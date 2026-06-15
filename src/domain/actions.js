@@ -69,8 +69,10 @@ export function deleteInbound(state, id) {
 }
 
 export function createInventory(state, formData) {
+  const id = String(formData.get("id") || "").trim();
   const code = String(formData.get("code") || "").trim();
-  const item = {
+  const record = {
+    id: id || makeId("stock"),
     code: code || `MAT-${String(state.inventory.length + 1).padStart(3, "0")}`,
     item: formData.get("item"),
     spec: formData.get("spec"),
@@ -84,20 +86,35 @@ export function createInventory(state, formData) {
     note: formData.get("note") || "",
     lastUpdate: todayString(),
   };
+  record.status = normalizeInventoryStatus(record);
 
-  const existing = state.inventory.find((record) => record.code === code);
+  const existing = id
+    ? state.inventory.find((item) => item.id === id)
+    : state.inventory.find((item) => item.code === record.code);
   if (existing) {
-    Object.assign(existing, item);
-    existing.id = existing.id || makeId("stock");
-    existing.status = normalizeInventoryStatus(existing);
+    Object.assign(existing, record);
   } else {
-    state.inventory.unshift({
-      id: makeId("stock"),
-      ...item,
-      status: normalizeInventoryStatus(item),
-    });
+    state.inventory.unshift(record);
   }
 
+  state.ui = {
+    ...(state.ui || {}),
+    inventoryEditingId: null,
+    inventoryViewingId: record.id,
+  };
+
+  return { ok: true, id: record.id };
+}
+
+export function deleteInventory(state, id) {
+  const index = state.inventory.findIndex((item) => item.id === id);
+  if (index < 0) return { ok: false, message: "库存记录不存在" };
+  const stock = state.inventory[index];
+  const outboundUsingStock = state.outbound.some((item) => item.item === stock.item && item.spec === stock.spec);
+  if (outboundUsingStock) return { ok: false, message: "该库存已有出库记录引用，建议先冻结，不建议删除。" };
+  state.inventory.splice(index, 1);
+  if (state.ui?.inventoryEditingId === id) state.ui.inventoryEditingId = null;
+  if (state.ui?.inventoryViewingId === id) state.ui.inventoryViewingId = null;
   return { ok: true };
 }
 

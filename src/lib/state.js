@@ -104,11 +104,33 @@ function normalizeMachineRecord(item, index = 0) {
   };
 }
 
+function normalizeInventoryRecord(item, index = 0) {
+  const qty = Number(item.qty || 0);
+  const safe = Number(item.safe || 0);
+  const status = item.status === "冻结" ? "冻结" : qty <= safe ? "低库存" : item.status || "正常";
+  return {
+    id: item.id || `stock-${String(index + 1).padStart(3, "0")}`,
+    code: item.code || `MAT-${String(index + 1).padStart(3, "0")}`,
+    item: item.item || "",
+    spec: item.spec || "",
+    location: item.location || item.warehouse || "",
+    qty,
+    reserved: Number(item.reserved || 0),
+    safe,
+    unit: item.unit || "",
+    status,
+    cost: Number(item.cost || 0),
+    note: item.note || "",
+    lastUpdate: item.lastUpdate || item.date || todayString(),
+  };
+}
+
 function migrateState(raw) {
   const base = clone(SEED_STATE);
   const next = { ...base, ...raw };
   next.ui = { ...base.ui, ...(raw.ui || {}) };
   next.inbound = Array.isArray(raw.inbound) ? raw.inbound.map((item, index) => normalizeInboundRecord(item, index)) : base.inbound;
+  next.inventory = Array.isArray(raw.inventory) ? raw.inventory.map((item, index) => normalizeInventoryRecord(item, index)) : base.inventory;
   next.machines = Array.isArray(raw.machines) ? raw.machines.map((item, index) => normalizeMachineRecord(item, index)) : base.machines;
   return next;
 }

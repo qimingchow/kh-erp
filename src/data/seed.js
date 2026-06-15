@@ -30,6 +30,8 @@ export const SEED_STATE = {
   ui: {
     inboundEditingId: null,
     inboundViewingId: null,
+    inventoryEditingId: null,
+    inventoryViewingId: null,
   },
   inbound: [
     {

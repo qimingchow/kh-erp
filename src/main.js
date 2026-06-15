@@ -22,6 +22,7 @@ import {
   createOutbound,
   createProduction,
   deleteInbound,
+  deleteInventory,
   updateMachine,
 } from "./domain/actions.js";
 import { renderOverview } from "./views/overview.js";
@@ -140,7 +141,7 @@ function renderMain(state) {
         elements.main.innerHTML = renderInbound(state, { currentUser });
         break;
       case "inventory":
-        elements.main.innerHTML = renderInventory(state);
+        elements.main.innerHTML = renderInventory(state, { currentUser });
         break;
       case "outbound":
         elements.main.innerHTML = renderOutbound(state);
@@ -489,6 +490,55 @@ document.addEventListener("click", (event) => {
       return;
     }
     const result = mutateState((draft) => deleteInbound(draft, button.getAttribute("data-id")));
+    if (result.ok === false) alert(result.message || "删除失败");
+    render();
+    return;
+  }
+
+  if (action === "inventory-view") {
+    setUi({
+      inventoryViewingId: button.getAttribute("data-id"),
+      inventoryEditingId: null,
+    });
+    render();
+    return;
+  }
+
+  if (action === "inventory-edit") {
+    if (!ensureCanEdit("inventory")) return;
+    const id = button.getAttribute("data-id");
+    setUi({
+      inventoryViewingId: id,
+      inventoryEditingId: id,
+    });
+    render();
+    document.querySelector('form[data-form="inventory"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  if (action === "inventory-cancel") {
+    clearUi(["inventoryEditingId"]);
+    render();
+    return;
+  }
+
+  if (action === "inventory-delete") {
+    const currentUser = getCurrentUser();
+    if (currentUser?.role !== "admin") {
+      alert("只有管理员可以删除库存记录。");
+      return;
+    }
+    if (button.getAttribute("data-confirmed") !== "true") {
+      button.setAttribute("data-confirmed", "true");
+      button.textContent = "确认删除";
+      window.setTimeout(() => {
+        if (!button.isConnected) return;
+        button.removeAttribute("data-confirmed");
+        button.textContent = "删除";
+      }, 3000);
+      return;
+    }
+    const result = mutateState((draft) => deleteInventory(draft, button.getAttribute("data-id")));
     if (result.ok === false) alert(result.message || "删除失败");
     render();
     return;
