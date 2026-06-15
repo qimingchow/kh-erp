@@ -1,0 +1,143 @@
+import { escapeHtml } from "../lib/format.js";
+import { icon } from "../lib/icons.js";
+
+const statusTone = {
+  正常: "ok",
+  运行: "ok",
+  已完成: "ok",
+  合格: "ok",
+  已收: "ok",
+  已付: "ok",
+  待检: "warn",
+  待收: "warn",
+  待付: "warn",
+  待排产: "info",
+  进行中: "info",
+  暂停: "warn",
+  维护: "danger",
+  异常: "danger",
+  低库存: "warn",
+  分选机: "info",
+  测试机: "ok",
+};
+
+export function badge(text) {
+  const tone = statusTone[text] || "neutral";
+  return `<span class="badge ${tone}">${escapeHtml(text)}</span>`;
+}
+
+export function fieldOptionsHtml(options, selectedValue) {
+  return options
+    .map(
+      (option) => `
+        <option value="${escapeHtml(option.value)}" ${String(option.value) === String(selectedValue) ? "selected" : ""}>
+          ${escapeHtml(option.label)}
+        </option>
+      `,
+    )
+    .join("");
+}
+
+export function renderField(field, value = "") {
+  const label = `<label for="${escapeHtml(field.name)}">${escapeHtml(field.label)}</label>`;
+  const common = `id="${escapeHtml(field.name)}" name="${escapeHtml(field.name)}" ${field.required === false ? "" : "required"}`;
+  const wrapperClass = `field ${field.full ? "full" : ""}`;
+
+  let control = "";
+  if (field.type === "select") {
+    control = `<select ${common}>${fieldOptionsHtml(field.options, value ?? field.defaultValue ?? "")}</select>`;
+  } else if (field.type === "textarea") {
+    control = `<textarea ${common} placeholder="${escapeHtml(field.placeholder || "")}">${escapeHtml(value ?? field.defaultValue ?? "")}</textarea>`;
+  } else {
+    const inputType = field.type || "text";
+    const currentValue = value ?? field.defaultValue ?? "";
+    const min = field.min !== undefined ? `min="${field.min}"` : "";
+    const max = field.max !== undefined ? `max="${field.max}"` : "";
+    const step = field.step !== undefined ? `step="${field.step}"` : "";
+    control = `<input ${common} type="${escapeHtml(inputType)}" value="${escapeHtml(currentValue)}" placeholder="${escapeHtml(field.placeholder || "")}" ${min} ${max} ${step} />`;
+  }
+
+  return `<div class="${wrapperClass}">${label}${control}</div>`;
+}
+
+export function renderCheckboxGroup(name, label, options, selectedValues = [], description = "") {
+  const values = new Set((selectedValues || []).map((value) => String(value)));
+  return `
+    <section class="check-panel">
+      <div class="check-panel-head">
+        <div class="check-panel-title">${escapeHtml(label)}</div>
+        ${description ? `<div class="small">${escapeHtml(description)}</div>` : ""}
+      </div>
+      <div class="check-grid">
+        ${options
+          .map(
+            (option) => `
+              <label class="check-item">
+                <input type="checkbox" name="${escapeHtml(name)}" value="${escapeHtml(option.value)}" ${values.has(String(option.value)) ? "checked" : ""} />
+                <span>${escapeHtml(option.label)}</span>
+              </label>
+            `,
+          )
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+export function renderForm(formKey, fields, submitLabel, values = {}) {
+  return `
+    <form class="stack" data-form="${escapeHtml(formKey)}">
+      <div class="field-grid">
+        ${fields.map((field) => renderField(field, values[field.name])).join("")}
+      </div>
+      <div class="form-actions">
+        <button class="btn primary" type="submit">
+          <span class="icon">${icon("plus")}</span>
+          ${escapeHtml(submitLabel)}
+        </button>
+      </div>
+    </form>
+  `;
+}
+
+export function renderTable(columns, rows) {
+  if (!rows.length) return `<div class="empty">当前还没有记录。</div>`;
+
+  return `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            ${columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}
+          </tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (row) => `
+                <tr>
+                  ${columns.map((column) => `<td>${column.render(row)}</td>`).join("")}
+                </tr>
+              `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+export function panel(title, description, body, aside = "") {
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h3>${escapeHtml(title)}</h3>
+          <p>${escapeHtml(description)}</p>
+        </div>
+        ${aside}
+      </div>
+      ${body}
+    </section>
+  `;
+}

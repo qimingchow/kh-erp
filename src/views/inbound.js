@@ -1,0 +1,281 @@
+import { badge, renderCheckboxGroup, renderTable } from "../ui/components.js";
+import { escapeHtml, formatDate, formatNumber } from "../lib/format.js";
+import { canEdit } from "../lib/state.js";
+
+const PROCESS_OPTIONS = [
+  { label: "测试", value: "测试" },
+  { label: "分选", value: "分选" },
+  { label: "抽测出图", value: "抽测出图" },
+  { label: "测试出图", value: "测试出图" },
+  { label: "翻膜", value: "翻膜" },
+  { label: "换标签", value: "换标签" },
+  { label: "其他", value: "其他" },
+];
+
+const SHAPE_OPTIONS = [
+  { label: "方形", value: "方形" },
+  { label: "圆形", value: "圆形" },
+];
+
+const BIN_OPTIONS = [
+  { label: "80000", value: "80000" },
+  { label: "78000", value: "78000" },
+  { label: "76000", value: "76000" },
+  { label: "其他", value: "其他" },
+];
+
+const ELECTRODE_OPTIONS = [
+  { label: "严卡", value: "严卡" },
+  { label: "轻微卡", value: "轻微卡" },
+];
+
+const LABEL_FORMAT_OPTIONS = [
+  { label: "中性标签", value: "中性标签" },
+  { label: "特定标签", value: "特定标签" },
+];
+
+const LABEL_SIZE_OPTIONS = [
+  { label: "60*40", value: "60*40" },
+  { label: "70*50", value: "70*50" },
+  { label: "80*50", value: "80*50" },
+  { label: "其他", value: "其他" },
+];
+
+const LABEL_POSITION_OPTIONS = [
+  { label: "左下", value: "左下" },
+  { label: "右下", value: "右下" },
+  { label: "右上", value: "右上" },
+  { label: "左上", value: "左上" },
+];
+
+const DEFECT_OPTIONS = [
+  { label: "收费排片方", value: "收费排片方" },
+  { label: "残留蓝膜寄回客户", value: "残留蓝膜寄回客户" },
+  { label: "我司自行处理", value: "我司自行处理" },
+];
+
+function listOf(value) {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  return String(value)
+    .split(/[、,，;；]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function buildDetail(item) {
+  return `${item.customerName || "-"} · ${item.productSpec || "-"}`;
+}
+
+function buildProcessText(item) {
+  const processes = listOf(item.processes);
+  const shapes = listOf(item.shapes);
+  const binOptions = listOf(item.binOptions);
+  const electrodeOptions = listOf(item.electrodeOptions);
+  const labelFormats = listOf(item.labelFormats);
+  const labelSizes = listOf(item.labelSizes);
+  const labelPositions = listOf(item.labelPositions);
+  const defectOptions = listOf(item.defectOptions);
+  const processParts = processes.length ? processes.join("、") : "未填写";
+  const shapeText = shapes.length ? shapes.join("、") : "未填写";
+  const binText = binOptions.length ? binOptions.join("、") : "未填写";
+  const electrodeText = electrodeOptions.length ? electrodeOptions.join("、") : "未填写";
+  const labelText = labelFormats.length ? labelFormats.join("、") : "未填写";
+  const labelSizeText = labelSizes.length ? labelSizes.join("、") : "未填写";
+  const labelPosText = labelPositions.length ? labelPositions.join("、") : "未填写";
+  const defectText = defectOptions.length ? defectOptions.join("、") : "未填写";
+  return `加工方式：${processParts}；形状：${shapeText}；Bin：${binText}；电极：${electrodeText}；标签：${labelText} / ${labelSizeText} / ${labelPosText}；不良处理：${defectText}`;
+}
+
+function defaultFormValues(record = {}) {
+  const current = record || {};
+  return {
+    customerName: current.customerName || "",
+    orderDate: current.orderDate || new Date().toISOString().slice(0, 10),
+    orderNo: current.orderNo || "",
+    productSpec: current.productSpec || "",
+    orderQty: current.orderQty || 0,
+    unit: current.unit || "K",
+    unitPrice: current.unitPrice || "",
+    amount: current.amount || "",
+    deliveryDate: current.deliveryDate || "",
+    note: current.note || "",
+    testCurrent: current.testCurrent || "150mA",
+    vz: current.vz || "",
+    vf3: current.vf3 || "",
+    ir: current.ir || "",
+    testStandardName: current.testStandardName || "",
+    sortingRequirement: current.sortingRequirement || "",
+  };
+}
+
+export function renderInbound(state, auth) {
+  const editable = canEdit(auth?.currentUser, "inbound");
+  const formRecord = state.inbound.find((item) => item.id === state.ui?.inboundEditingId) || null;
+  const selectedRecord =
+    state.inbound.find((item) => item.id === state.ui?.inboundViewingId) || formRecord || state.inbound[0] || null;
+
+  const formValues = {
+    ...defaultFormValues(formRecord),
+    processes: listOf(formRecord?.processes),
+    shapes: listOf(formRecord?.shapes),
+    binOptions: listOf(formRecord?.binOptions),
+    electrodeOptions: listOf(formRecord?.electrodeOptions),
+    labelFormats: listOf(formRecord?.labelFormats),
+    labelSizes: listOf(formRecord?.labelSizes),
+    labelPositions: listOf(formRecord?.labelPositions),
+    defectOptions: listOf(formRecord?.defectOptions),
+    currentEditId: formRecord?.id || "",
+  };
+
+  const formFields = [
+    { name: "customerName", label: "客户名称", placeholder: "例如：深圳市金凯半导体科技有限公司" },
+    { name: "orderDate", label: "来料日期", type: "date", defaultValue: new Date().toISOString().slice(0, 10) },
+    { name: "orderNo", label: "订单编号", placeholder: "例如：MO-20260614-001" },
+    { name: "productSpec", label: "品名 / 规格", placeholder: "例如：Y3N3" },
+    { name: "orderQty", label: "订单数量", type: "number", min: 0, step: 1, defaultValue: 0 },
+    { name: "unit", label: "单位", placeholder: "K / PCS / 批" },
+    { name: "unitPrice", label: "单价", type: "number", min: 0, step: 0.01, defaultValue: "", required: false },
+    { name: "amount", label: "金额", type: "number", min: 0, step: 0.01, defaultValue: "", required: false },
+    { name: "deliveryDate", label: "交货日期", type: "date", defaultValue: "", required: false },
+    { name: "note", label: "备注", type: "textarea", full: true, required: false, placeholder: "补充说明" },
+  ];
+
+  const columns = [
+    { label: "客户", render: (row) => escapeHtml(row.customerName) },
+    { label: "日期", render: (row) => escapeHtml(formatDate(row.orderDate)) },
+    { label: "订单", render: (row) => escapeHtml(row.orderNo || "-") },
+    { label: "品名/规格", render: (row) => `${escapeHtml(row.productSpec || "-")}<div class="small">${escapeHtml(row.unit || "-")} · ${formatNumber(row.orderQty || 0)}</div>` },
+    { label: "交货日期", render: (row) => escapeHtml(formatDate(row.deliveryDate)) },
+    { label: "加工方式", render: (row) => badge(listOf(row.processes)[0] || "测试") },
+    { label: "备注", render: (row) => escapeHtml(row.note || "-") },
+    {
+      label: "操作",
+      render: (row) => `
+        <div class="row-actions">
+          <button class="btn mini" type="button" data-action="inbound-view" data-id="${escapeHtml(row.id)}">查看</button>
+          ${editable ? `<button class="btn mini" type="button" data-action="inbound-edit" data-id="${escapeHtml(row.id)}">编辑</button>` : ""}
+          ${auth?.currentUser?.role === "admin" ? `<button class="btn mini danger" type="button" data-action="inbound-delete" data-id="${escapeHtml(row.id)}">删除</button>` : ""}
+        </div>
+      `,
+    },
+  ];
+
+  return `
+    <div class="content-grid">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>来料录入</h3>
+            <p>根据你给的接单表，先把客户、订单、加工方式和检验要求录进系统，后面再逐步拆成更细的工艺单。</p>
+          </div>
+          <div class="small">共 ${state.inbound.length} 条</div>
+        </div>
+
+        ${editable ? `
+          <form class="stack" data-form="inbound">
+            <input type="hidden" name="id" value="${escapeHtml(formValues.currentEditId || "")}" />
+            <section class="sheet-section">
+              <div class="section-title">客户 / 订单信息</div>
+              <div class="field-grid">
+                ${renderFormFields(formFields, formValues)}
+              </div>
+            </section>
+            <section class="sheet-section">
+              <div class="section-title">加工方式</div>
+              ${renderCheckboxGroup("processes", "加工方式", PROCESS_OPTIONS, formValues.processes, "多选")}
+              ${renderCheckboxGroup("shapes", "形状要求", SHAPE_OPTIONS, formValues.shapes, "适用于分选要求")}
+            </section>
+            <section class="sheet-section">
+              <div class="section-title">测试 / 分选标准</div>
+              <div class="field-grid">
+                <div class="field">
+                  <label>测试电流</label>
+                  <input name="testCurrent" type="text" value="${escapeHtml(formValues.testCurrent || "")}" placeholder="例如：150 mA" />
+                </div>
+                <div class="field">
+                  <label>VZ</label>
+                  <input name="vz" type="text" value="${escapeHtml(formValues.vz || "")}" placeholder="例如：uA" />
+                </div>
+                <div class="field">
+                  <label>VF3</label>
+                  <input name="vf3" type="text" value="${escapeHtml(formValues.vf3 || "")}" placeholder="例如：uA" />
+                </div>
+                <div class="field">
+                  <label>IR</label>
+                  <input name="ir" type="text" value="${escapeHtml(formValues.ir || "")}" placeholder="例如：V" />
+                </div>
+                <div class="field full">
+                  <label>测试标准档案名称</label>
+                  <input name="testStandardName" type="text" value="${escapeHtml(formValues.testStandardName || "")}" />
+                </div>
+                <div class="field full">
+                  <label>分选要求</label>
+                  <input name="sortingRequirement" type="text" value="${escapeHtml(formValues.sortingRequirement || "")}" />
+                </div>
+              </div>
+            </section>
+            <section class="sheet-section">
+              <div class="section-title">标签打印 / 不良处理</div>
+              ${renderCheckboxGroup("binOptions", "Bin 选择", BIN_OPTIONS, formValues.binOptions, "")}
+              ${renderCheckboxGroup("electrodeOptions", "表面电极卡控", ELECTRODE_OPTIONS, formValues.electrodeOptions, "")}
+              ${renderCheckboxGroup("labelFormats", "成品标签格式", LABEL_FORMAT_OPTIONS, formValues.labelFormats, "")}
+              ${renderCheckboxGroup("labelSizes", "成品标签尺寸", LABEL_SIZE_OPTIONS, formValues.labelSizes, "")}
+              ${renderCheckboxGroup("labelPositions", "成品贴标位置", LABEL_POSITION_OPTIONS, formValues.labelPositions, "")}
+              ${renderCheckboxGroup("defectOptions", "不符合分选条件的芯片处理", DEFECT_OPTIONS, formValues.defectOptions, "")}
+            </section>
+            <div class="form-actions">
+              <button class="btn primary" type="submit">${formRecord ? "保存修改" : "保存来料"}</button>
+              ${formRecord ? `<button class="btn ghost" type="button" data-action="inbound-cancel">取消编辑</button>` : ""}
+            </div>
+          </form>
+        ` : `
+          <div class="empty">当前账号没有录入权限。</div>
+        `}
+
+        ${renderTable(columns, state.inbound)}
+      </section>
+
+      <aside class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>单据摘要</h3>
+            <p>这个摘要区可以逐步演变成完整的接单单据预览，方便后面打印或导出。</p>
+          </div>
+        </div>
+        ${selectedRecord ? `
+          <div class="mini-list">
+            <div class="mini-item">
+              <strong>${escapeHtml(selectedRecord.customerName)}</strong>
+              <div class="small">${escapeHtml(buildDetail(selectedRecord))}</div>
+            </div>
+            <div class="mini-item">
+              <strong>加工方式</strong>
+              <div class="small">${escapeHtml(buildProcessText(selectedRecord))}</div>
+            </div>
+            <div class="mini-item">
+              <strong>创建/更新</strong>
+              <div class="small">${escapeHtml(selectedRecord.updatedAt || selectedRecord.orderDate)}</div>
+            </div>
+          </div>
+        ` : `<div class="empty">暂无记录</div>`}
+      </aside>
+    </div>
+  `;
+}
+
+function renderFormFields(fields, values) {
+  return fields.map((field) => {
+    const value = values[field.name];
+    const label = `<label for="${escapeHtml(field.name)}">${escapeHtml(field.label)}</label>`;
+    const common = `id="${escapeHtml(field.name)}" name="${escapeHtml(field.name)}" ${field.required === false ? "" : "required"}`;
+    const currentValue = value ?? field.defaultValue ?? "";
+    if (field.type === "textarea") {
+      return `<div class="field ${field.full ? "full" : ""}">${label}<textarea ${common}>${escapeHtml(currentValue)}</textarea></div>`;
+    }
+    const inputType = field.type || "text";
+    const min = field.min !== undefined ? `min="${field.min}"` : "";
+    const step = field.step !== undefined ? `step="${field.step}"` : "";
+    return `<div class="field ${field.full ? "full" : ""}">${label}<input ${common} type="${escapeHtml(inputType)}" value="${escapeHtml(currentValue)}" placeholder="${escapeHtml(field.placeholder || "")}" ${min} ${step} /></div>`;
+  }).join("");
+}

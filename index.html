@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>坤禾半导体进销存系统原型</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">KH</div>
+          <div>
+            <h1>坤禾半导体</h1>
+            <p>来料、库存、生产、机台、财务一体化原型</p>
+          </div>
+        </div>
+
+        <nav id="nav" class="nav" aria-label="系统导航"></nav>
+
+        <div class="sidebar-footer">
+          <button class="btn ghost" data-action="restore-seed" type="button">
+            <span class="icon" data-icon="refresh"></span>
+            恢复样例数据
+          </button>
+          <div class="meta">
+            这个版本先做前端分层和可交互样例，后面可以继续接 API、权限、扫码、审批和报表。
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <section class="auth-bar" id="auth-bar"></section>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">坤禾半导体 ERP 原型</p>
+            <h2 id="page-title">总览</h2>
+            <p id="page-desc" class="page-desc"></p>
+          </div>
+          <div class="actions">
+            <button class="btn" data-action="export-excel" type="button">
+              <span class="icon" data-icon="download"></span>
+              导出 Excel
+            </button>
+            <button class="btn primary" data-action="new-record" type="button">
+              <span class="icon" data-icon="plus"></span>
+              新建记录
+            </button>
+          </div>
+        </header>
+
+        <section class="kpi-grid" id="kpi-grid" aria-label="关键指标"></section>
+
+        <section id="main-content"></section>
+      </main>
+    </div>
+
+    <script>
+      window.__kunheBooted = false;
+      window.setTimeout(() => {
+        if (window.__kunheBooted) return;
+        const authBar = document.getElementById("auth-bar");
+        if (!authBar) return;
+        authBar.innerHTML =
+          '<div class="auth-meta"><div class="auth-title">页面脚本未启动</div><div class="auth-sub">当前是文件路径预览，请用本地 HTTP 地址打开，例如 http://127.0.0.1:4173/index.html。</div></div>';
+      }, 1200);
+    </script>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
