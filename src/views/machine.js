@@ -17,6 +17,7 @@ export function renderMachine(state) {
   const grouped = groupMachines(state);
   const orderedTypes = [...MACHINE_TYPES, ...[...grouped.keys()].filter((type) => !MACHINE_TYPES.includes(type))];
   const uniqueTypes = [...new Set(orderedTypes)];
+  const runningMachines = state.machines.filter((item) => item.status === "运行").length;
 
   const machineGrid = uniqueTypes
     .map((type) => {
@@ -78,7 +79,11 @@ export function renderMachine(state) {
             <h3>机台看板</h3>
             <p>这里按分选机和测试机分组展示。后面如果增加新机型，直接往数据里加类型即可。</p>
           </div>
-          <div class="small">共 ${state.machines.length} 台设备</div>
+          <div class="module-stat">
+            <span>运行机台</span>
+            <strong>${formatNumber(runningMachines)}</strong>
+            <span>共 ${state.machines.length} 台设备</span>
+          </div>
         </div>
         ${machineGrid}
       </section>

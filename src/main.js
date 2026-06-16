@@ -129,6 +129,13 @@ function renderAuthBar(auth, currentUser) {
 }
 
 function renderKpis(state) {
+  if (state.active !== "overview") {
+    elements.kpis.hidden = true;
+    elements.kpis.innerHTML = "";
+    return;
+  }
+
+  elements.kpis.hidden = false;
   const inboundQty = sum(state.inbound, (item) => item.orderQty || item.qty);
   const stockQty = sum(state.inventory, (item) => item.qty);
   const runningMachines = state.machines.filter((item) => item.status === "运行").length;
@@ -474,8 +481,18 @@ function newRecord() {
   const currentTarget = formViews.includes(state.active) ? state.active : "inbound";
   const target = canEdit(currentUser, FORM_RESOURCE[currentTarget]) ? currentTarget : "inbound";
   setActive(target);
+  if (target === "inbound") {
+    setUi({
+      inboundEditingId: null,
+      inboundViewingId: null,
+      inboundFormOpen: true,
+    });
+  }
   render();
-  document.querySelector(`form[data-form="${target}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const targetElement = target === "inbound"
+    ? document.getElementById("inbound-form-panel")
+    : document.querySelector(`form[data-form="${target}"]`);
+  targetElement?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function ensureCanEdit(resource) {
@@ -574,10 +591,23 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (action === "inbound-new") {
+    if (!ensureCanEdit("inbound")) return;
+    setUi({
+      inboundViewingId: null,
+      inboundEditingId: null,
+      inboundFormOpen: true,
+    });
+    render();
+    document.getElementById("inbound-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
   if (action === "inbound-view") {
     setUi({
       inboundViewingId: button.getAttribute("data-id"),
       inboundEditingId: null,
+      inboundFormOpen: false,
     });
     render();
     document.getElementById("inbound-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -590,14 +620,15 @@ document.addEventListener("click", (event) => {
     setUi({
       inboundViewingId: id,
       inboundEditingId: id,
+      inboundFormOpen: true,
     });
     render();
-    document.querySelector('form[data-form="inbound"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById("inbound-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
   if (action === "inbound-cancel") {
-    clearUi(["inboundEditingId"]);
+    clearUi(["inboundEditingId", "inboundFormOpen"]);
     render();
     return;
   }
@@ -892,6 +923,7 @@ document.addEventListener("submit", (event) => {
     runner
       .then((payload) => {
         applyServerBootstrap(payload);
+        if (formKey === "inbound") clearUi(["inboundEditingId", "inboundFormOpen"]);
         render();
       })
       .catch((error) => alert(error.message || "保存失败"));
@@ -912,6 +944,7 @@ document.addEventListener("submit", (event) => {
     return;
   }
 
+  if (formKey === "inbound") clearUi(["inboundEditingId", "inboundFormOpen"]);
   render();
 });
 

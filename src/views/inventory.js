@@ -79,6 +79,7 @@ export function renderInventory(state, auth = {}) {
 
   const lowStockItems = state.inventory.filter((item) => item.qty <= item.safe).map((item) => item.item);
   const frozenItems = state.inventory.filter((item) => item.status === "冻结").map((item) => item.item);
+  const stockQty = state.inventory.reduce((total, item) => total + Number(item.qty || 0), 0);
 
   return `
     <div class="content-grid">
@@ -88,7 +89,11 @@ export function renderInventory(state, auth = {}) {
             <h3>库存管理</h3>
             <p>支持查看、编辑、删除和低库存预警。后续可以继续接条码、盘点和货位图。</p>
           </div>
-          <div class="small">共 ${state.inventory.length} 条物料</div>
+          <div class="module-stat">
+            <span>当前库存</span>
+            <strong>${formatNumber(stockQty)}</strong>
+            <span>共 ${state.inventory.length} 条物料</span>
+          </div>
         </div>
         ${editable ? `
           <form class="stack" data-form="inventory">

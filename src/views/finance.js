@@ -2,6 +2,9 @@ import { badge, renderForm, renderTable } from "../ui/components.js";
 import { escapeHtml, formatCurrency, formatDate } from "../lib/format.js";
 
 export function renderFinance(state) {
+  const pendingReceivable = state.finance
+    .filter((item) => item.type === "应收" && item.status !== "已收")
+    .reduce((total, item) => total + item.amount, 0);
   const fields = [
     { name: "date", label: "日期", type: "date", defaultValue: new Date().toISOString().slice(0, 10) },
     {
@@ -64,7 +67,11 @@ export function renderFinance(state) {
             <h3>财务记录</h3>
             <p>先把出库后的应收、来料对应的应付和收付款先记清楚，后面再接总账和对账单。</p>
           </div>
-          <div class="small">共 ${state.finance.length} 条</div>
+          <div class="module-stat">
+            <span>待收账款</span>
+            <strong>${formatCurrency(pendingReceivable)}</strong>
+            <span>共 ${state.finance.length} 条记录</span>
+          </div>
         </div>
         ${renderForm("finance", fields, "保存财务")}
         ${renderTable(columns, state.finance)}

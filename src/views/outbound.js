@@ -112,6 +112,7 @@ export function renderOutbound(state, auth = {}) {
   const selectedFinance = selectedRecord
     ? state.finance.find((item) => item.id === selectedRecord.financeId || item.outboundId === selectedRecord.id)
     : null;
+  const outboundAmount = state.outbound.reduce((total, item) => total + Number(item.amount || 0), 0);
 
   return `
     <div class="content-grid">
@@ -121,7 +122,11 @@ export function renderOutbound(state, auth = {}) {
             <h3>出库记录</h3>
             <p>出库时会自动扣减对应库存，并生成或更新一条财务应收记录。</p>
           </div>
-          <div class="small">共 ${state.outbound.length} 条</div>
+          <div class="module-stat">
+            <span>本页统计</span>
+            <strong>${formatCurrency(outboundAmount)}</strong>
+            <span>共 ${state.outbound.length} 条出库</span>
+          </div>
         </div>
         ${editable ? `
           <form class="stack" data-form="outbound">

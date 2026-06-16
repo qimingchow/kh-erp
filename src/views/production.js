@@ -3,6 +3,7 @@ import { escapeHtml, formatDate, formatNumber } from "../lib/format.js";
 import { getMachineName } from "../domain/actions.js";
 
 export function renderProduction(state) {
+  const pendingPlans = state.production.filter((item) => item.status !== "已完成").length;
   const machineOptions = state.machines.map((item) => ({
     value: item.id,
     label: `${item.type} · ${item.name} · ${item.area} · ${item.status}`,
@@ -67,7 +68,11 @@ export function renderProduction(state) {
             <h3>生产计划</h3>
             <p>把订单、交期、机台和进度连在一起，方便往后扩展排产、工序和报工。</p>
           </div>
-          <div class="small">共 ${state.production.length} 条</div>
+          <div class="module-stat">
+            <span>在制计划</span>
+            <strong>${formatNumber(pendingPlans)}</strong>
+            <span>共 ${state.production.length} 条计划</span>
+          </div>
         </div>
         ${renderForm("production", fields, "保存计划")}
         ${renderTable(columns, state.production)}

@@ -297,82 +297,105 @@ export function renderInbound(state, auth) {
     },
   ];
 
+  const inboundQty = state.inbound.reduce((total, item) => total + Number(item.orderQty || item.qty || 0), 0);
+  const formOpen = Boolean(state.ui?.inboundFormOpen || formRecord);
+  const formTitle = formRecord ? "编辑来料单" : "新增来料单";
+
+  const inboundForm = editable ? `
+    <section class="panel" id="inbound-form-panel">
+      <div class="panel-header">
+        <div>
+          <h3>${formTitle}</h3>
+          <p>根据客户加工接单表录入客户、订单、加工方式和测试/分选标准。</p>
+        </div>
+      </div>
+      <form class="stack" data-form="inbound">
+        <input type="hidden" name="id" value="${escapeHtml(formValues.currentEditId || "")}" />
+        <section class="sheet-section">
+          <div class="section-title">客户 / 订单信息</div>
+          <div class="field-grid">
+            ${renderFormFields(formFields, formValues)}
+          </div>
+        </section>
+        <section class="sheet-section">
+          <div class="section-title">加工方式</div>
+          ${renderCheckboxGroup("processes", "加工方式", PROCESS_OPTIONS, formValues.processes, "多选")}
+          ${renderCheckboxGroup("shapes", "形状要求", SHAPE_OPTIONS, formValues.shapes, "适用于分选要求")}
+        </section>
+        <section class="sheet-section conditional-section" data-standard-section="test" ${showTestStandard ? "" : "hidden"}>
+          <div class="section-title">测试标准</div>
+          <div class="field-grid">
+            ${renderTextField("testCurrent", "测试电流", formValues.testCurrent, { placeholder: "例如：150 mA" })}
+            ${renderTextField("vz", "VZ", formValues.vz, { placeholder: "例如：uA", required: false })}
+            ${renderTextField("vf3", "VF3", formValues.vf3, { placeholder: "例如：uA", required: false })}
+            ${renderTextField("ir", "IR", formValues.ir, { placeholder: "例如：V", required: false })}
+            ${renderTextField("testOther", "其他", formValues.testOther, { required: false })}
+            ${renderTextField("testStandardName", "测试标准档案名称", formValues.testStandardName, { full: true, required: false })}
+          </div>
+        </section>
+        <section class="sheet-section conditional-section" data-standard-section="sorting" ${showSortingStandard ? "" : "hidden"}>
+          <div class="section-title">分选标准</div>
+          <div class="field-grid">
+            ${renderTextField("sortingVf1", "VF1", formValues.sortingVf1, { placeholder: "例如：2.8-2.9-3.1", required: false })}
+            ${renderTextField("sortingVf3", "VF3", formValues.sortingVf3, { placeholder: "例如：2.15-2.35", required: false })}
+            ${renderTextField("sortingLop", "LOP", formValues.sortingLop, { placeholder: "例如：230-250-300", required: false })}
+            ${renderTextField("sortingWld", "WLD", formValues.sortingWld, { placeholder: "例如：447.5-450-452.5", required: false })}
+            ${renderTextField("sortingIr", "IR", formValues.sortingIr, { placeholder: "例如：0-0.5", required: false })}
+            ${renderTextField("sortingOther", "其他", formValues.sortingOther || formValues.sortingRequirement, { full: true, required: false })}
+          </div>
+          ${renderBinOptions(formValues.binOptions, formValues.binOther)}
+          ${renderCheckboxGroup("electrodeOptions", "表面电极卡控", ELECTRODE_OPTIONS, formValues.electrodeOptions, "")}
+        </section>
+        <section class="sheet-section">
+          <div class="section-title">目检标准</div>
+          ${renderCheckboxGroup("inspectionOptions", "目检标准", INSPECTION_OPTIONS, formValues.inspectionOptions, "")}
+          <div class="field-grid">
+            ${renderTextField("inspectionNote", "备注", formValues.inspectionNote, { full: true, required: false })}
+          </div>
+        </section>
+        <section class="sheet-section">
+          <div class="section-title">标签打印 / 不良处理</div>
+          ${renderCheckboxGroup("labelFormats", "成品标签格式", LABEL_FORMAT_OPTIONS, formValues.labelFormats, "")}
+          ${renderCheckboxGroup("labelSizes", "成品标签尺寸", LABEL_SIZE_OPTIONS, formValues.labelSizes, "")}
+          ${renderCheckboxGroup("labelPositions", "成品贴标位置", LABEL_POSITION_OPTIONS, formValues.labelPositions, "")}
+          ${renderCheckboxGroup("defectOptions", "不符合分选条件的芯片处理", DEFECT_OPTIONS, formValues.defectOptions, "")}
+        </section>
+        <div class="form-actions">
+          <button class="btn primary" type="submit">${formRecord ? "保存修改" : "保存来料"}</button>
+          <button class="btn ghost" type="button" data-action="inbound-cancel">${formRecord ? "取消编辑" : "收起表单"}</button>
+        </div>
+      </form>
+    </section>
+  ` : "";
+
   return `
-    <div class="content-grid">
+    <div class="page-stack">
       <section class="panel">
         <div class="panel-header">
           <div>
-            <h3>来料录入</h3>
-            <p>根据你给的接单表，先把客户、订单、加工方式和检验要求录进系统，后面再逐步拆成更细的工艺单。</p>
+            <h3>来料单据列表</h3>
+            <p>先查看已经录入的接单记录，再从列表进入查看、编辑或删除。</p>
           </div>
-          <div class="small">共 ${state.inbound.length} 条</div>
-        </div>
-
-        ${editable ? `
-          <form class="stack" data-form="inbound">
-            <input type="hidden" name="id" value="${escapeHtml(formValues.currentEditId || "")}" />
-            <section class="sheet-section">
-              <div class="section-title">客户 / 订单信息</div>
-              <div class="field-grid">
-                ${renderFormFields(formFields, formValues)}
-              </div>
-            </section>
-            <section class="sheet-section">
-              <div class="section-title">加工方式</div>
-              ${renderCheckboxGroup("processes", "加工方式", PROCESS_OPTIONS, formValues.processes, "多选")}
-              ${renderCheckboxGroup("shapes", "形状要求", SHAPE_OPTIONS, formValues.shapes, "适用于分选要求")}
-            </section>
-            <section class="sheet-section conditional-section" data-standard-section="test" ${showTestStandard ? "" : "hidden"}>
-              <div class="section-title">测试标准</div>
-              <div class="field-grid">
-                ${renderTextField("testCurrent", "测试电流", formValues.testCurrent, { placeholder: "例如：150 mA" })}
-                ${renderTextField("vz", "VZ", formValues.vz, { placeholder: "例如：uA", required: false })}
-                ${renderTextField("vf3", "VF3", formValues.vf3, { placeholder: "例如：uA", required: false })}
-                ${renderTextField("ir", "IR", formValues.ir, { placeholder: "例如：V", required: false })}
-                ${renderTextField("testOther", "其他", formValues.testOther, { required: false })}
-                ${renderTextField("testStandardName", "测试标准档案名称", formValues.testStandardName, { full: true, required: false })}
-              </div>
-            </section>
-            <section class="sheet-section conditional-section" data-standard-section="sorting" ${showSortingStandard ? "" : "hidden"}>
-              <div class="section-title">分选标准</div>
-              <div class="field-grid">
-                ${renderTextField("sortingVf1", "VF1", formValues.sortingVf1, { placeholder: "例如：2.8-2.9-3.1", required: false })}
-                ${renderTextField("sortingVf3", "VF3", formValues.sortingVf3, { placeholder: "例如：2.15-2.35", required: false })}
-                ${renderTextField("sortingLop", "LOP", formValues.sortingLop, { placeholder: "例如：230-250-300", required: false })}
-                ${renderTextField("sortingWld", "WLD", formValues.sortingWld, { placeholder: "例如：447.5-450-452.5", required: false })}
-                ${renderTextField("sortingIr", "IR", formValues.sortingIr, { placeholder: "例如：0-0.5", required: false })}
-                ${renderTextField("sortingOther", "其他", formValues.sortingOther || formValues.sortingRequirement, { full: true, required: false })}
-              </div>
-              ${renderBinOptions(formValues.binOptions, formValues.binOther)}
-              ${renderCheckboxGroup("electrodeOptions", "表面电极卡控", ELECTRODE_OPTIONS, formValues.electrodeOptions, "")}
-            </section>
-            <section class="sheet-section">
-              <div class="section-title">目检标准</div>
-              ${renderCheckboxGroup("inspectionOptions", "目检标准", INSPECTION_OPTIONS, formValues.inspectionOptions, "")}
-              <div class="field-grid">
-                ${renderTextField("inspectionNote", "备注", formValues.inspectionNote, { full: true, required: false })}
-              </div>
-            </section>
-            <section class="sheet-section">
-              <div class="section-title">标签打印 / 不良处理</div>
-              ${renderCheckboxGroup("labelFormats", "成品标签格式", LABEL_FORMAT_OPTIONS, formValues.labelFormats, "")}
-              ${renderCheckboxGroup("labelSizes", "成品标签尺寸", LABEL_SIZE_OPTIONS, formValues.labelSizes, "")}
-              ${renderCheckboxGroup("labelPositions", "成品贴标位置", LABEL_POSITION_OPTIONS, formValues.labelPositions, "")}
-              ${renderCheckboxGroup("defectOptions", "不符合分选条件的芯片处理", DEFECT_OPTIONS, formValues.defectOptions, "")}
-            </section>
-            <div class="form-actions">
-              <button class="btn primary" type="submit">${formRecord ? "保存修改" : "保存来料"}</button>
-              ${formRecord ? `<button class="btn ghost" type="button" data-action="inbound-cancel">取消编辑</button>` : ""}
+          <div class="module-header-actions">
+            <div class="module-stat">
+              <span>来料总量</span>
+              <strong>${formatNumber(inboundQty)}</strong>
+              <span>共 ${state.inbound.length} 条</span>
             </div>
-          </form>
-        ` : `
-          <div class="empty">当前账号没有录入权限。</div>
-        `}
-
+            ${editable ? `
+              <button class="btn primary" type="button" data-action="inbound-new">
+                新增来料
+              </button>
+            ` : ""}
+          </div>
+        </div>
+        ${!editable ? `<div class="empty">当前账号没有录入权限，可查看来料单据。</div>` : ""}
         ${renderTable(columns, state.inbound)}
       </section>
 
-      <aside class="panel">
+      ${formOpen ? inboundForm : ""}
+
+      <section class="panel">
         <div class="panel-header">
           <div>
             <h3>单据详情</h3>
@@ -380,7 +403,7 @@ export function renderInbound(state, auth) {
           </div>
         </div>
         ${renderInboundDetail(selectedRecord)}
-      </aside>
+      </section>
     </div>
   `;
 }
