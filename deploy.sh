@@ -37,9 +37,48 @@ rsync -az --delete \
   "$REMOTE:$REMOTE_DIR/"
 
 echo "3. Restarting remote service..."
-ssh "$REMOTE" "set -e; cd '$REMOTE_DIR'; if command -v pgrep >/dev/null 2>&1; then pgrep -f 'node .*server/server.js' | xargs -r kill; fi; nohup env HOST='$REMOTE_BIND' PORT='$REMOTE_PORT' npm run start > '$REMOTE_LOG' 2>&1 &"
+ssh "$REMOTE" bash -s -- "$REMOTE_DIR" "$REMOTE_BIND" "$REMOTE_PORT" "$REMOTE_LOG" <<'REMOTE_SCRIPT'
+set -euo pipefail
+
+remote_dir="$1"
+bind="$2"
+port="$3"
+log_file="$4"
+
+cd "$remote_dir"
+
+node_pids="$(ps -eo pid=,comm=,args= | awk '$2 ~ /^(node|nodejs)$/ && $0 ~ /server\/server\.js/ {print $1}' || true)"
+if [[ -n "$node_pids" ]]; then
+  kill $node_pids || true
+  sleep 1
+fi
+
+if ! command -v npm >/dev/null 2>&1; then
+  echo "npm command not found on remote server." >&2
+  exit 1
+fi
+
+nohup env HOST="$bind" PORT="$port" npm run start > "$log_file" 2>&1 &
+REMOTE_SCRIPT
 
 echo "4. Verifying health..."
-ssh "$REMOTE" "curl -fsS http://127.0.0.1:$REMOTE_PORT/api/health"
+ssh "$REMOTE" bash -s -- "$REMOTE_PORT" "$REMOTE_DIR/$REMOTE_LOG" <<'REMOTE_SCRIPT'
+set -euo pipefail
+
+port="$1"
+log_file="$2"
+
+for _ in $(seq 1 20); do
+  if curl -fsS "http://127.0.0.1:${port}/api/health"; then
+    echo
+    exit 0
+  fi
+  sleep 0.5
+done
+
+echo "Health check failed. Recent service log:" >&2
+tail -n 80 "$log_file" >&2 || true
+exit 1
+REMOTE_SCRIPT
 
 echo "Deploy complete."
