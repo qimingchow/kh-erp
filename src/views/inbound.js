@@ -21,7 +21,6 @@ const BIN_OPTIONS = [
   { label: "80000", value: "80000" },
   { label: "78000", value: "78000" },
   { label: "76000", value: "76000" },
-  { label: "其他", value: "其他" },
 ];
 
 const ELECTRODE_OPTIONS = [
@@ -54,6 +53,11 @@ const DEFECT_OPTIONS = [
   { label: "我司自行处理", value: "我司自行处理" },
 ];
 
+const INSPECTION_OPTIONS = [
+  { label: "简单外观目检", value: "简单外观目检" },
+  { label: "严格电极目检", value: "严格电极目检" },
+];
+
 function listOf(value) {
   if (Array.isArray(value)) return value;
   if (!value) return [];
@@ -74,6 +78,18 @@ function renderDetailItem(label, value) {
     <div class="detail-item">
       <span>${escapeHtml(label)}</span>
       <strong>${escapeHtml(detailValue(value))}</strong>
+    </div>
+  `;
+}
+
+function renderTextField(name, label, value, options = {}) {
+  const fullClass = options.full ? " full" : "";
+  const placeholder = options.placeholder || "";
+  const required = options.required === false ? "" : "required";
+  return `
+    <div class="field${fullClass}">
+      <label for="${escapeHtml(name)}">${escapeHtml(label)}</label>
+      <input id="${escapeHtml(name)}" name="${escapeHtml(name)}" type="text" value="${escapeHtml(value || "")}" placeholder="${escapeHtml(placeholder)}" ${required} />
     </div>
   `;
 }
@@ -104,21 +120,40 @@ function renderInboundDetail(record) {
         </div>
       </div>
       <div class="detail-section">
-        <div class="section-title">测试 / 分选标准</div>
+        <div class="section-title">测试标准</div>
         <div class="detail-grid">
           ${renderDetailItem("测试电流", record.testCurrent)}
           ${renderDetailItem("VZ", record.vz)}
           ${renderDetailItem("VF3", record.vf3)}
           ${renderDetailItem("IR", record.ir)}
+          ${renderDetailItem("其他", record.testOther)}
           ${renderDetailItem("测试标准档案名称", record.testStandardName)}
-          ${renderDetailItem("分选要求", record.sortingRequirement)}
+        </div>
+      </div>
+      <div class="detail-section">
+        <div class="section-title">分选标准</div>
+        <div class="detail-grid">
+          ${renderDetailItem("VF1", record.sortingVf1)}
+          ${renderDetailItem("VF3", record.sortingVf3)}
+          ${renderDetailItem("LOP", record.sortingLop)}
+          ${renderDetailItem("WLD", record.sortingWld)}
+          ${renderDetailItem("IR", record.sortingIr)}
+          ${renderDetailItem("Bin 选择", listOf(record.binOptions))}
+          ${renderDetailItem("Bin 其他", record.binOther)}
+          ${renderDetailItem("表面电极卡控", listOf(record.electrodeOptions))}
+          ${renderDetailItem("其他", record.sortingOther || record.sortingRequirement)}
+        </div>
+      </div>
+      <div class="detail-section">
+        <div class="section-title">目检标准</div>
+        <div class="detail-grid">
+          ${renderDetailItem("目检方式", listOf(record.inspectionOptions))}
+          ${renderDetailItem("备注", record.inspectionNote)}
         </div>
       </div>
       <div class="detail-section">
         <div class="section-title">标签打印 / 不良处理</div>
         <div class="detail-grid">
-          ${renderDetailItem("Bin 选择", listOf(record.binOptions))}
-          ${renderDetailItem("表面电极卡控", listOf(record.electrodeOptions))}
           ${renderDetailItem("成品标签格式", listOf(record.labelFormats))}
           ${renderDetailItem("成品标签尺寸", listOf(record.labelSizes))}
           ${renderDetailItem("成品贴标位置", listOf(record.labelPositions))}
@@ -150,8 +185,17 @@ function defaultFormValues(record = {}) {
     vz: current.vz || "",
     vf3: current.vf3 || "",
     ir: current.ir || "",
+    testOther: current.testOther || "",
     testStandardName: current.testStandardName || "",
+    sortingVf1: current.sortingVf1 || "",
+    sortingVf3: current.sortingVf3 || "",
+    sortingLop: current.sortingLop || "",
+    sortingWld: current.sortingWld || "",
+    sortingIr: current.sortingIr || "",
+    sortingOther: current.sortingOther || "",
     sortingRequirement: current.sortingRequirement || "",
+    binOther: current.binOther || "",
+    inspectionNote: current.inspectionNote || "",
   };
 }
 
@@ -171,6 +215,7 @@ export function renderInbound(state, auth) {
     labelSizes: listOf(formRecord?.labelSizes),
     labelPositions: listOf(formRecord?.labelPositions),
     defectOptions: listOf(formRecord?.defectOptions),
+    inspectionOptions: listOf(formRecord?.inspectionOptions),
     currentEditId: formRecord?.id || "",
   };
 
@@ -233,38 +278,39 @@ export function renderInbound(state, auth) {
               ${renderCheckboxGroup("shapes", "形状要求", SHAPE_OPTIONS, formValues.shapes, "适用于分选要求")}
             </section>
             <section class="sheet-section">
-              <div class="section-title">测试 / 分选标准</div>
+              <div class="section-title">测试标准</div>
               <div class="field-grid">
-                <div class="field">
-                  <label for="testCurrent">测试电流</label>
-                  <input id="testCurrent" name="testCurrent" type="text" value="${escapeHtml(formValues.testCurrent || "")}" placeholder="例如：150 mA" />
-                </div>
-                <div class="field">
-                  <label for="vz">VZ</label>
-                  <input id="vz" name="vz" type="text" value="${escapeHtml(formValues.vz || "")}" placeholder="例如：uA" />
-                </div>
-                <div class="field">
-                  <label for="vf3">VF3</label>
-                  <input id="vf3" name="vf3" type="text" value="${escapeHtml(formValues.vf3 || "")}" placeholder="例如：uA" />
-                </div>
-                <div class="field">
-                  <label for="ir">IR</label>
-                  <input id="ir" name="ir" type="text" value="${escapeHtml(formValues.ir || "")}" placeholder="例如：V" />
-                </div>
-                <div class="field full">
-                  <label for="testStandardName">测试标准档案名称</label>
-                  <input id="testStandardName" name="testStandardName" type="text" value="${escapeHtml(formValues.testStandardName || "")}" />
-                </div>
-                <div class="field full">
-                  <label for="sortingRequirement">分选要求</label>
-                  <input id="sortingRequirement" name="sortingRequirement" type="text" value="${escapeHtml(formValues.sortingRequirement || "")}" />
-                </div>
+                ${renderTextField("testCurrent", "测试电流", formValues.testCurrent, { placeholder: "例如：150 mA" })}
+                ${renderTextField("vz", "VZ", formValues.vz, { placeholder: "例如：uA", required: false })}
+                ${renderTextField("vf3", "VF3", formValues.vf3, { placeholder: "例如：uA", required: false })}
+                ${renderTextField("ir", "IR", formValues.ir, { placeholder: "例如：V", required: false })}
+                ${renderTextField("testOther", "其他", formValues.testOther, { required: false })}
+                ${renderTextField("testStandardName", "测试标准档案名称", formValues.testStandardName, { full: true, required: false })}
+              </div>
+            </section>
+            <section class="sheet-section">
+              <div class="section-title">分选标准</div>
+              <div class="field-grid">
+                ${renderTextField("sortingVf1", "VF1", formValues.sortingVf1, { placeholder: "例如：2.8-2.9-3.1", required: false })}
+                ${renderTextField("sortingVf3", "VF3", formValues.sortingVf3, { placeholder: "例如：2.15-2.35", required: false })}
+                ${renderTextField("sortingLop", "LOP", formValues.sortingLop, { placeholder: "例如：230-250-300", required: false })}
+                ${renderTextField("sortingWld", "WLD", formValues.sortingWld, { placeholder: "例如：447.5-450-452.5", required: false })}
+                ${renderTextField("sortingIr", "IR", formValues.sortingIr, { placeholder: "例如：0-0.5", required: false })}
+                ${renderTextField("binOther", "Bin 其他", formValues.binOther, { placeholder: "按客户要求填写", required: false })}
+                ${renderTextField("sortingOther", "其他", formValues.sortingOther || formValues.sortingRequirement, { full: true, required: false })}
+              </div>
+              ${renderCheckboxGroup("binOptions", "Bin 选择", BIN_OPTIONS, formValues.binOptions, "")}
+              ${renderCheckboxGroup("electrodeOptions", "表面电极卡控", ELECTRODE_OPTIONS, formValues.electrodeOptions, "")}
+            </section>
+            <section class="sheet-section">
+              <div class="section-title">目检标准</div>
+              ${renderCheckboxGroup("inspectionOptions", "目检标准", INSPECTION_OPTIONS, formValues.inspectionOptions, "")}
+              <div class="field-grid">
+                ${renderTextField("inspectionNote", "备注", formValues.inspectionNote, { full: true, required: false })}
               </div>
             </section>
             <section class="sheet-section">
               <div class="section-title">标签打印 / 不良处理</div>
-              ${renderCheckboxGroup("binOptions", "Bin 选择", BIN_OPTIONS, formValues.binOptions, "")}
-              ${renderCheckboxGroup("electrodeOptions", "表面电极卡控", ELECTRODE_OPTIONS, formValues.electrodeOptions, "")}
               ${renderCheckboxGroup("labelFormats", "成品标签格式", LABEL_FORMAT_OPTIONS, formValues.labelFormats, "")}
               ${renderCheckboxGroup("labelSizes", "成品标签尺寸", LABEL_SIZE_OPTIONS, formValues.labelSizes, "")}
               ${renderCheckboxGroup("labelPositions", "成品贴标位置", LABEL_POSITION_OPTIONS, formValues.labelPositions, "")}

@@ -45,16 +45,26 @@ function normalizeInboundRecord(item, index = 0) {
       processes: toList(item.processes),
       shapes: toList(item.shapes),
       binOptions: toList(item.binOptions),
+      binOther: item.binOther || "",
       electrodeOptions: toList(item.electrodeOptions),
       labelFormats: toList(item.labelFormats),
       labelSizes: toList(item.labelSizes),
       labelPositions: toList(item.labelPositions),
       defectOptions: toList(item.defectOptions),
+      inspectionOptions: toList(item.inspectionOptions),
+      inspectionNote: item.inspectionNote || "",
       testCurrent: item.testCurrent || "",
       vz: item.vz || "",
       vf3: item.vf3 || "",
       ir: item.ir || "",
+      testOther: item.testOther || "",
       testStandardName: item.testStandardName || "",
+      sortingVf1: item.sortingVf1 || extractSortingValue(item.sortingRequirement, "VF1"),
+      sortingVf3: item.sortingVf3 || extractSortingValue(item.sortingRequirement, "VF3"),
+      sortingLop: item.sortingLop || extractSortingValue(item.sortingRequirement, "LOP"),
+      sortingWld: item.sortingWld || extractSortingValue(item.sortingRequirement, "WLD"),
+      sortingIr: item.sortingIr || extractSortingValue(item.sortingRequirement, "IR"),
+      sortingOther: item.sortingOther || sortingOtherFromRequirement(item.sortingRequirement),
       sortingRequirement: item.sortingRequirement || "",
       updatedAt: item.updatedAt || item.orderDate || todayString(),
     };
@@ -76,19 +86,48 @@ function normalizeInboundRecord(item, index = 0) {
     processes: toList(item.processes),
     shapes: toList(item.shapes),
     binOptions: toList(item.binOptions),
+    binOther: item.binOther || "",
     electrodeOptions: toList(item.electrodeOptions),
     labelFormats: toList(item.labelFormats),
     labelSizes: toList(item.labelSizes),
     labelPositions: toList(item.labelPositions),
     defectOptions: toList(item.defectOptions),
+    inspectionOptions: toList(item.inspectionOptions),
+    inspectionNote: item.inspectionNote || "",
     testCurrent: item.testCurrent || "",
     vz: item.vz || "",
     vf3: item.vf3 || "",
     ir: item.ir || "",
+    testOther: item.testOther || "",
     testStandardName: item.testStandardName || "",
+    sortingVf1: item.sortingVf1 || extractSortingValue(item.sortingRequirement, "VF1"),
+    sortingVf3: item.sortingVf3 || extractSortingValue(item.sortingRequirement, "VF3"),
+    sortingLop: item.sortingLop || extractSortingValue(item.sortingRequirement, "LOP"),
+    sortingWld: item.sortingWld || extractSortingValue(item.sortingRequirement, "WLD"),
+    sortingIr: item.sortingIr || extractSortingValue(item.sortingRequirement, "IR"),
+    sortingOther: item.sortingOther || sortingOtherFromRequirement(item.sortingRequirement),
     sortingRequirement: item.sortingRequirement || "",
     updatedAt: item.updatedAt || item.date || todayString(),
   };
+}
+
+function extractSortingValue(value, key) {
+  if (!value) return "";
+  const pattern = new RegExp(`${key}\\s*[:：]\\s*([^;；\\n]+)`, "i");
+  const match = String(value).match(pattern);
+  return match?.[1]?.trim() || "";
+}
+
+function sortingOtherFromRequirement(value) {
+  if (!value) return "";
+  const cleaned = String(value)
+    .replace(/VF1\s*[:：]\s*[^;；\n]+[;；]?/gi, "")
+    .replace(/VF3\s*[:：]\s*[^;；\n]+[;；]?/gi, "")
+    .replace(/LOP\s*[:：]\s*[^;；\n]+[;；]?/gi, "")
+    .replace(/WLD\s*[:：]\s*[^;；\n]+[;；]?/gi, "")
+    .replace(/IR\s*[:：]\s*[^;；\n]+[;；]?/gi, "")
+    .trim();
+  return cleaned || "";
 }
 
 function normalizeMachineRecord(item, index = 0) {
