@@ -32,6 +32,8 @@ export const SEED_STATE = {
     inboundViewingId: null,
     inventoryEditingId: null,
     inventoryViewingId: null,
+    outboundEditingId: null,
+    outboundViewingId: null,
   },
   inbound: [
     {
@@ -174,11 +176,11 @@ export const SEED_STATE = {
       item: "测试完成批次",
       spec: "KH-A100 / Bin1",
       location: "F1-02",
-      qty: 86,
+      qty: 26,
       reserved: 12,
       safe: 30,
       unit: "批",
-      status: "正常",
+      status: "低库存",
       cost: 128.5,
       note: "可直接出库",
       lastUpdate: "2026-06-13",
@@ -187,6 +189,8 @@ export const SEED_STATE = {
   outbound: [
     {
       id: "out-001",
+      inventoryId: "stock-004",
+      financeId: "fin-001",
       date: "2026-06-13",
       customer: "华南模组",
       orderNo: "SO-20260613-01",
@@ -203,6 +207,8 @@ export const SEED_STATE = {
     },
     {
       id: "out-002",
+      inventoryId: "stock-004",
+      financeId: "fin-002",
       date: "2026-06-14",
       customer: "北方电子",
       orderNo: "SO-20260614-02",

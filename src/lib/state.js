@@ -125,12 +125,62 @@ function normalizeInventoryRecord(item, index = 0) {
   };
 }
 
+function normalizeOutboundRecord(item, index = 0, inventory = [], finance = []) {
+  const matchedStock =
+    (item.inventoryId && inventory.find((stock) => stock.id === item.inventoryId)) ||
+    inventory.find(
+      (stock) =>
+        stock.item === item.item &&
+        stock.spec === item.spec &&
+        (stock.location === item.warehouse || stock.warehouse === item.warehouse),
+    ) ||
+    inventory.find((stock) => stock.item === item.item && stock.spec === item.spec) ||
+    null;
+  const orderNo = item.orderNo || "";
+  const matchedFinance =
+    (item.financeId && finance.find((record) => record.id === item.financeId)) ||
+    (item.id && finance.find((record) => record.outboundId === item.id)) ||
+    finance.find((record) => record.source === `出库单 ${orderNo}`) ||
+    finance.find(
+      (record) => orderNo && String(record.source || "").includes(orderNo) && (!item.customer || record.counterparty === item.customer),
+    ) ||
+    null;
+  const qty = Number(item.qty || 0);
+  const unitPrice = Number(item.unitPrice || 0);
+  const amount = item.amount !== undefined && item.amount !== "" ? Number(item.amount || 0) : Number((qty * unitPrice).toFixed(2));
+
+  if (matchedFinance && item.id && !matchedFinance.outboundId) matchedFinance.outboundId = item.id;
+
+  return {
+    id: item.id || `out-${String(index + 1).padStart(3, "0")}`,
+    inventoryId: item.inventoryId || matchedStock?.id || "",
+    financeId: item.financeId || matchedFinance?.id || "",
+    date: item.date || todayString(),
+    customer: item.customer || item.counterparty || "",
+    orderNo,
+    item: item.item || matchedStock?.item || "",
+    spec: item.spec || matchedStock?.spec || "",
+    qty,
+    unit: item.unit || matchedStock?.unit || "",
+    unitPrice,
+    amount,
+    warehouse: item.warehouse || matchedStock?.location || "",
+    logistics: item.logistics || "",
+    settlement: item.settlement || matchedFinance?.status || "待收",
+    note: item.note || "",
+    updatedAt: item.updatedAt || item.date || todayString(),
+  };
+}
+
 function migrateState(raw) {
   const base = clone(SEED_STATE);
   const next = { ...base, ...raw };
   next.ui = { ...base.ui, ...(raw.ui || {}) };
   next.inbound = Array.isArray(raw.inbound) ? raw.inbound.map((item, index) => normalizeInboundRecord(item, index)) : base.inbound;
   next.inventory = Array.isArray(raw.inventory) ? raw.inventory.map((item, index) => normalizeInventoryRecord(item, index)) : base.inventory;
+  next.outbound = Array.isArray(raw.outbound)
+    ? raw.outbound.map((item, index) => normalizeOutboundRecord(item, index, next.inventory, next.finance || []))
+    : base.outbound;
   next.machines = Array.isArray(raw.machines) ? raw.machines.map((item, index) => normalizeMachineRecord(item, index)) : base.machines;
   return next;
 }

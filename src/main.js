@@ -23,6 +23,7 @@ import {
   createProduction,
   deleteInbound,
   deleteInventory,
+  deleteOutbound,
   updateMachine,
 } from "./domain/actions.js";
 import { renderOverview } from "./views/overview.js";
@@ -144,7 +145,7 @@ function renderMain(state) {
         elements.main.innerHTML = renderInventory(state, { currentUser });
         break;
       case "outbound":
-        elements.main.innerHTML = renderOutbound(state);
+        elements.main.innerHTML = renderOutbound(state, { currentUser });
         break;
       case "production":
         elements.main.innerHTML = renderProduction(state);
@@ -539,6 +540,55 @@ document.addEventListener("click", (event) => {
       return;
     }
     const result = mutateState((draft) => deleteInventory(draft, button.getAttribute("data-id")));
+    if (result.ok === false) alert(result.message || "删除失败");
+    render();
+    return;
+  }
+
+  if (action === "outbound-view") {
+    setUi({
+      outboundViewingId: button.getAttribute("data-id"),
+      outboundEditingId: null,
+    });
+    render();
+    return;
+  }
+
+  if (action === "outbound-edit") {
+    if (!ensureCanEdit("outbound")) return;
+    const id = button.getAttribute("data-id");
+    setUi({
+      outboundViewingId: id,
+      outboundEditingId: id,
+    });
+    render();
+    document.querySelector('form[data-form="outbound"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  if (action === "outbound-cancel") {
+    clearUi(["outboundEditingId"]);
+    render();
+    return;
+  }
+
+  if (action === "outbound-delete") {
+    const currentUser = getCurrentUser();
+    if (currentUser?.role !== "admin") {
+      alert("只有管理员可以删除出库记录。");
+      return;
+    }
+    if (button.getAttribute("data-confirmed") !== "true") {
+      button.setAttribute("data-confirmed", "true");
+      button.textContent = "确认删除";
+      window.setTimeout(() => {
+        if (!button.isConnected) return;
+        button.removeAttribute("data-confirmed");
+        button.textContent = "删除";
+      }, 3000);
+      return;
+    }
+    const result = mutateState((draft) => deleteOutbound(draft, button.getAttribute("data-id")));
     if (result.ok === false) alert(result.message || "删除失败");
     render();
     return;

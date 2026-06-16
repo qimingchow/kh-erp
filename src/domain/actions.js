@@ -5,6 +5,58 @@ export function normalizeInventoryStatus(item) {
   return item.qty <= item.safe ? "低库存" : "正常";
 }
 
+function findInventoryForOutbound(state, record) {
+  if (!record) return null;
+  if (record.inventoryId) {
+    const exact = state.inventory.find((item) => item.id === record.inventoryId);
+    if (exact) return exact;
+  }
+
+  const itemName = String(record.item || "");
+  const spec = String(record.spec || "");
+  const warehouse = String(record.warehouse || "");
+  return (
+    state.inventory.find(
+      (item) => item.item === itemName && item.spec === spec && (item.location === warehouse || item.warehouse === warehouse),
+    ) || state.inventory.find((item) => item.item === itemName && item.spec === spec) || null
+  );
+}
+
+function findFinanceForOutbound(state, record) {
+  if (!record) return null;
+  if (record.financeId) {
+    const exact = state.finance.find((item) => item.id === record.financeId);
+    if (exact) return exact;
+  }
+
+  const source = `出库单 ${record.orderNo || ""}`;
+  return (
+    state.finance.find((item) => item.source === source) ||
+    state.finance.find(
+      (item) =>
+        record.orderNo &&
+        String(item.source || "").includes(record.orderNo) &&
+        (!record.customer || item.counterparty === record.customer),
+    ) ||
+    null
+  );
+}
+
+function buildOutboundFinance(record, financeId) {
+  return {
+    id: financeId || makeId("fin"),
+    outboundId: record.id,
+    date: record.date,
+    type: "应收",
+    source: `出库单 ${record.orderNo}`,
+    counterparty: record.customer,
+    amount: record.amount,
+    status: record.settlement,
+    method: record.settlement === "已收" ? "转账" : "月结",
+    note: "由出库自动生成",
+  };
+}
+
 export function getMachineName(state, id) {
   return state.machines.find((item) => item.id === id)?.name || "未指定";
 }
@@ -110,7 +162,9 @@ export function deleteInventory(state, id) {
   const index = state.inventory.findIndex((item) => item.id === id);
   if (index < 0) return { ok: false, message: "库存记录不存在" };
   const stock = state.inventory[index];
-  const outboundUsingStock = state.outbound.some((item) => item.item === stock.item && item.spec === stock.spec);
+  const outboundUsingStock = state.outbound.some(
+    (item) => item.inventoryId === stock.id || (item.item === stock.item && item.spec === stock.spec),
+  );
   if (outboundUsingStock) return { ok: false, message: "该库存已有出库记录引用，建议先冻结，不建议删除。" };
   state.inventory.splice(index, 1);
   if (state.ui?.inventoryEditingId === id) state.ui.inventoryEditingId = null;
@@ -119,17 +173,25 @@ export function deleteInventory(state, id) {
 }
 
 export function createOutbound(state, formData) {
+  const id = String(formData.get("id") || "").trim();
   const inventoryId = String(formData.get("inventoryId") || "");
   const stock = state.inventory.find((item) => item.id === inventoryId);
   if (!stock) return { ok: false, message: "请选择一个库存物料。" };
 
   const qty = Number(formData.get("qty") || 0);
-  if (!qty || qty > stock.qty) return { ok: false, message: "出库数量不能大于可用库存。" };
+  const existing = id ? state.outbound.find((item) => item.id === id) : null;
+  const previousStock = existing ? findInventoryForOutbound(state, existing) : null;
+  if (existing && !previousStock) return { ok: false, message: "原出库关联库存不存在，无法自动回滚。" };
+
+  const availableQty = Number(stock.qty || 0) + (previousStock?.id === stock.id ? Number(existing.qty || 0) : 0);
+  if (!qty || qty > availableQty) return { ok: false, message: "出库数量不能大于可用库存。" };
 
   const unitPrice = Number(formData.get("unitPrice") || 0);
   const amount = Number((qty * unitPrice).toFixed(2));
   const record = {
-    id: makeId("out"),
+    id: existing?.id || makeId("out"),
+    inventoryId,
+    financeId: existing?.financeId || "",
     date: formData.get("date"),
     customer: formData.get("customer"),
     orderNo: formData.get("orderNo"),
@@ -143,24 +205,65 @@ export function createOutbound(state, formData) {
     logistics: formData.get("logistics"),
     settlement: formData.get("settlement"),
     note: formData.get("note") || "",
+    updatedAt: timestampNow(),
   };
+
+  if (previousStock) {
+    previousStock.qty += Number(existing.qty || 0);
+    previousStock.lastUpdate = record.date;
+    previousStock.status = normalizeInventoryStatus(previousStock);
+  }
 
   stock.qty -= qty;
   stock.lastUpdate = record.date;
   stock.status = normalizeInventoryStatus(stock);
-  state.outbound.unshift(record);
-  state.finance.unshift({
-    id: makeId("fin"),
-    date: record.date,
-    type: "应收",
-    source: `出库单 ${record.orderNo}`,
-    counterparty: record.customer,
-    amount,
-    status: record.settlement,
-    method: record.settlement === "已收" ? "转账" : "月结",
-    note: "由出库自动生成",
-  });
 
+  const linkedFinance = existing ? findFinanceForOutbound(state, existing) : null;
+  const financeRecord = buildOutboundFinance(record, linkedFinance?.id || record.financeId);
+  record.financeId = financeRecord.id;
+
+  if (existing) {
+    Object.assign(existing, record);
+  } else {
+    state.outbound.unshift(record);
+  }
+
+  if (linkedFinance) {
+    Object.assign(linkedFinance, financeRecord);
+  } else {
+    state.finance.unshift(financeRecord);
+  }
+
+  state.ui = {
+    ...(state.ui || {}),
+    outboundEditingId: null,
+    outboundViewingId: record.id,
+  };
+
+  return { ok: true, id: record.id };
+}
+
+export function deleteOutbound(state, id) {
+  const index = state.outbound.findIndex((item) => item.id === id);
+  if (index < 0) return { ok: false, message: "出库记录不存在" };
+
+  const record = state.outbound[index];
+  const stock = findInventoryForOutbound(state, record);
+  if (!stock) return { ok: false, message: "原出库关联库存不存在，无法自动回滚。" };
+
+  stock.qty += Number(record.qty || 0);
+  stock.lastUpdate = todayString();
+  stock.status = normalizeInventoryStatus(stock);
+
+  const finance = findFinanceForOutbound(state, record);
+  if (finance) {
+    const financeIndex = state.finance.findIndex((item) => item.id === finance.id);
+    if (financeIndex >= 0) state.finance.splice(financeIndex, 1);
+  }
+
+  state.outbound.splice(index, 1);
+  if (state.ui?.outboundEditingId === id) state.ui.outboundEditingId = null;
+  if (state.ui?.outboundViewingId === id) state.ui.outboundViewingId = null;
   return { ok: true };
 }
 
