@@ -37,7 +37,7 @@ rsync -az --delete \
   "$REMOTE:$REMOTE_DIR/"
 
 echo "3. Restarting remote service..."
-ssh "$REMOTE" "set -e; cd '$REMOTE_DIR'; pkill -f 'server/server.js' || true; nohup env HOST='$REMOTE_BIND' PORT='$REMOTE_PORT' npm run start > '$REMOTE_LOG' 2>&1 &"
+ssh "$REMOTE" "set -e; cd '$REMOTE_DIR'; if command -v pgrep >/dev/null 2>&1; then pgrep -f 'node .*server/server.js' | xargs -r kill; fi; nohup env HOST='$REMOTE_BIND' PORT='$REMOTE_PORT' npm run start > '$REMOTE_LOG' 2>&1 &"
 
 echo "4. Verifying health..."
 ssh "$REMOTE" "curl -fsS http://127.0.0.1:$REMOTE_PORT/api/health"
