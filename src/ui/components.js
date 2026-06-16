@@ -107,7 +107,28 @@ export function renderTable(columns, rows) {
   if (!rows.length) return `<div class="empty">当前还没有记录。</div>`;
 
   return `
-    <div class="table-wrap">
+    <div class="record-list">
+      ${rows
+        .map(
+          (row) => `
+            <article class="record-card">
+              ${columns
+                .map((column) => {
+                  const isAction = column.label === "操作";
+                  return `
+                    <div class="record-card-field ${isAction ? "record-card-actions" : ""}">
+                      <span>${escapeHtml(column.label)}</span>
+                      <div>${column.render(row)}</div>
+                    </div>
+                  `;
+                })
+                .join("")}
+            </article>
+          `,
+        )
+        .join("")}
+    </div>
+    <div class="table-wrap responsive-table" aria-label="桌面表格">
       <table>
         <thead>
           <tr>

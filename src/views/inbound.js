@@ -78,21 +78,6 @@ function usesSortingStandard(processes) {
   return listOf(processes).includes("分选");
 }
 
-function detailValue(value) {
-  if (Array.isArray(value)) return value.length ? value.join("、") : "未填写";
-  if (value === 0) return "0";
-  return value ? String(value) : "未填写";
-}
-
-function renderDetailItem(label, value) {
-  return `
-    <div class="detail-item">
-      <span>${escapeHtml(label)}</span>
-      <strong>${escapeHtml(detailValue(value))}</strong>
-    </div>
-  `;
-}
-
 function renderBinOptions(selectedValues = [], binOther = "") {
   const values = new Set((selectedValues || []).map((value) => String(value)));
   return `
@@ -131,81 +116,176 @@ function renderTextField(name, label, value, options = {}) {
   `;
 }
 
+function checkedMark(values, value) {
+  return listOf(values).includes(value) ? "☑" : "☐";
+}
+
+function textValue(value) {
+  if (Array.isArray(value)) return escapeHtml(value.length ? value.join("、") : "");
+  if (value === 0) return "0";
+  return escapeHtml(value ? String(value) : "");
+}
+
+function renderSheetLine(label, value, className = "") {
+  return `<div class="work-sheet-line ${className}"><span>${escapeHtml(label)}</span><strong>${textValue(value)}</strong></div>`;
+}
+
 function renderInboundDetail(record) {
   if (!record) return `<div class="empty">暂无记录</div>`;
   const showTestStandard = usesTestStandard(record.processes);
   const showSortingStandard = usesSortingStandard(record.processes);
+  const processes = listOf(record.processes);
+  const shapes = listOf(record.shapes);
+  const binOptions = listOf(record.binOptions);
+  const electrodeOptions = listOf(record.electrodeOptions);
+  const inspectionOptions = listOf(record.inspectionOptions);
+  const labelFormats = listOf(record.labelFormats);
+  const labelSizes = listOf(record.labelSizes);
+  const labelPositions = listOf(record.labelPositions);
+  const defectOptions = listOf(record.defectOptions);
+  const binOtherChecked = record.binOther ? "☑" : "☐";
 
   return `
-    <div class="detail-sheet" id="inbound-detail">
-      <div class="detail-section">
-        <div class="section-title">客户 / 订单信息</div>
-        <div class="detail-grid">
-          ${renderDetailItem("客户名称", record.customerName)}
-          ${renderDetailItem("来料日期", formatDate(record.orderDate || record.date))}
-          ${renderDetailItem("订单编号", record.orderNo)}
-          ${renderDetailItem("品名 / 规格", record.productSpec)}
-          ${renderDetailItem("订单数量", `${formatNumber(record.orderQty || 0)} ${record.unit || ""}`)}
-          ${renderDetailItem("单价", record.unitPrice)}
-          ${renderDetailItem("金额", record.amount)}
-          ${renderDetailItem("交货日期", formatDate(record.deliveryDate))}
+    <div class="work-sheet-wrap" id="inbound-detail">
+      <div class="work-sheet">
+      <div class="work-sheet-title">
+        <h3>坤禾半导体（东莞）有限公司</h3>
+        <h4>客户加工接单表</h4>
+      </div>
+
+      <div class="work-sheet-customer">
+        <span>客户名称：</span>
+        <strong>${textValue(record.customerName)}</strong>
+      </div>
+
+      <div class="work-sheet-order">
+        <div>序号</div>
+        <div>来料日期</div>
+        <div>订单编号</div>
+        <div>品名/规格</div>
+        <div>订单数量</div>
+        <div>单位</div>
+        <div>单价</div>
+        <div>金额</div>
+        <div>交货日期</div>
+        <div>备注</div>
+        <div>1</div>
+        <div>${escapeHtml(formatDate(record.orderDate || record.date))}</div>
+        <div>${textValue(record.orderNo)}</div>
+        <div>${textValue(record.productSpec)}</div>
+        <div>${formatNumber(record.orderQty || 0)}</div>
+        <div>${textValue(record.unit)}</div>
+        <div>${textValue(record.unitPrice)}</div>
+        <div>${textValue(record.amount)}</div>
+        <div>${escapeHtml(formatDate(record.deliveryDate))}</div>
+        <div>${textValue(record.note)}</div>
+      </div>
+
+      <div class="work-sheet-row">
+        <div class="work-sheet-label">加工方式：</div>
+        <div class="work-sheet-content">
+          <span>${checkedMark(processes, "测试")} 1. 测试</span>
+          <span>${checkedMark(processes, "分选")} 2. 分选（形状要求：${checkedMark(shapes, "方形")} 方形　${checkedMark(shapes, "圆形")} 圆形）</span>
+          <span>${checkedMark(processes, "抽测出图")} 3. 抽测出图</span>
+          <span>${checkedMark(processes, "测试出图")} 4. 测试出图</span>
+          <span>${checkedMark(processes, "翻膜")} 5. 翻膜</span>
+          <span>${checkedMark(processes, "换标签")} 6. 换标签</span>
+          <span>${checkedMark(processes, "其他")} 7. 其他</span>
         </div>
       </div>
-      <div class="detail-section">
-        <div class="section-title">加工方式</div>
-        <div class="detail-grid">
-          ${renderDetailItem("加工方式", listOf(record.processes))}
-          ${renderDetailItem("形状要求", listOf(record.shapes))}
-        </div>
-      </div>
+
       ${showTestStandard ? `
-      <div class="detail-section">
-        <div class="section-title">测试标准</div>
-        <div class="detail-grid">
-          ${renderDetailItem("测试电流", record.testCurrent)}
-          ${renderDetailItem("VZ", record.vz)}
-          ${renderDetailItem("VF3", record.vf3)}
-          ${renderDetailItem("IR", record.ir)}
-          ${renderDetailItem("其他", record.testOther)}
-          ${renderDetailItem("测试标准档案名称", record.testStandardName)}
+      <div class="work-sheet-row">
+        <div class="work-sheet-label">测试标准：</div>
+        <div class="work-sheet-content sheet-grid">
+          ${renderSheetLine("测试电流", record.testCurrent)}
+          ${renderSheetLine("VZ", record.vz)}
+          ${renderSheetLine("VF3", record.vf3)}
+          ${renderSheetLine("IR", record.ir)}
+          ${renderSheetLine("其他", record.testOther)}
+          ${renderSheetLine("测试标准档案名称", record.testStandardName, "wide")}
         </div>
       </div>
       ` : ""}
       ${showSortingStandard ? `
-      <div class="detail-section">
-        <div class="section-title">分选标准</div>
-        <div class="detail-grid">
-          ${renderDetailItem("VF1", record.sortingVf1)}
-          ${renderDetailItem("VF3", record.sortingVf3)}
-          ${renderDetailItem("LOP", record.sortingLop)}
-          ${renderDetailItem("WLD", record.sortingWld)}
-          ${renderDetailItem("IR", record.sortingIr)}
-          ${renderDetailItem("Bin 选择", listOf(record.binOptions))}
-          ${renderDetailItem("Bin 其他", record.binOther)}
-          ${renderDetailItem("表面电极卡控", listOf(record.electrodeOptions))}
-          ${renderDetailItem("其他", record.sortingOther || record.sortingRequirement)}
+      <div class="work-sheet-row">
+        <div class="work-sheet-label">分选要求：</div>
+        <div class="work-sheet-content">
+          <div class="sheet-lines">
+            ${renderSheetLine("VF1", record.sortingVf1)}
+            ${renderSheetLine("VF3", record.sortingVf3)}
+            ${renderSheetLine("LOP", record.sortingLop)}
+            ${renderSheetLine("WLD", record.sortingWld)}
+            ${renderSheetLine("IR", record.sortingIr)}
+          </div>
+          <div class="sheet-check-line">
+            2. 分选满 Bin 直径：
+            <span>${checkedMark(binOptions, "80000")} 80000</span>
+            <span>${checkedMark(binOptions, "78000")} 78000</span>
+            <span>${checkedMark(binOptions, "76000")} 76000</span>
+            <span>${binOtherChecked} 其他：${textValue(record.binOther)}</span>
+          </div>
+          <div class="sheet-check-line">
+            3. 表面电极卡控：
+            <span>${checkedMark(electrodeOptions, "严卡")} 严卡</span>
+            <span>${checkedMark(electrodeOptions, "轻微卡")} 轻微卡</span>
+          </div>
+          ${renderSheetLine("4. 其他", record.sortingOther || record.sortingRequirement, "wide")}
         </div>
       </div>
       ` : ""}
-      <div class="detail-section">
-        <div class="section-title">目检标准</div>
-        <div class="detail-grid">
-          ${renderDetailItem("目检方式", listOf(record.inspectionOptions))}
-          ${renderDetailItem("备注", record.inspectionNote)}
+
+      <div class="work-sheet-row">
+        <div class="work-sheet-label">目检标准：</div>
+        <div class="work-sheet-content sheet-check-line">
+          <span>${checkedMark(inspectionOptions, "简单外观目检")} 简单外观目检</span>
+          <span>${checkedMark(inspectionOptions, "严格电极目检")} 严格电极目检</span>
+          <span>备注：${textValue(record.inspectionNote)}</span>
         </div>
       </div>
-      <div class="detail-section">
-        <div class="section-title">标签打印 / 不良处理</div>
-        <div class="detail-grid">
-          ${renderDetailItem("成品标签格式", listOf(record.labelFormats))}
-          ${renderDetailItem("成品标签尺寸", listOf(record.labelSizes))}
-          ${renderDetailItem("成品贴标位置", listOf(record.labelPositions))}
-          ${renderDetailItem("不良处理", listOf(record.defectOptions))}
+
+      <div class="work-sheet-row">
+        <div class="work-sheet-label">标签打印：</div>
+        <div class="work-sheet-content">
+          <div class="sheet-check-line">
+            1. 成品标签格式：
+            <span>${checkedMark(labelFormats, "中性标签")} 中性标签</span>
+            <span>${checkedMark(labelFormats, "特定标签")} 特定标签</span>
+          </div>
+          <div class="sheet-check-line">
+            2. 成品标签尺寸：
+            <span>${checkedMark(labelSizes, "60*40")} 60*40</span>
+            <span>${checkedMark(labelSizes, "70*50")} 70*50</span>
+            <span>${checkedMark(labelSizes, "80*50")} 80*50</span>
+            <span>${checkedMark(labelSizes, "其他")} 其他</span>
+          </div>
+          <div class="sheet-check-line">
+            3. 成品贴标位置：
+            <span>${checkedMark(labelPositions, "左下")} 左下</span>
+            <span>${checkedMark(labelPositions, "右下")} 右下</span>
+            <span>${checkedMark(labelPositions, "右上")} 右上</span>
+            <span>${checkedMark(labelPositions, "左上")} 左上</span>
+          </div>
         </div>
       </div>
-      <div class="detail-section">
-        <div class="section-title">备注</div>
-        <div class="small">${escapeHtml(record.note || "未填写")}</div>
+
+      <div class="work-sheet-row single">
+        <div class="work-sheet-content sheet-check-line">
+          不符合分选条件的芯片处理：
+          <span>${checkedMark(defectOptions, "收费排片方")} 收费排片方</span>
+          <span>${checkedMark(defectOptions, "残留蓝膜寄回客户")} 残留蓝膜寄回客户</span>
+          <span>${checkedMark(defectOptions, "我司自行处理")} 我司自行处理</span>
+        </div>
+      </div>
+
+      <div class="work-sheet-row single">
+        <div class="work-sheet-content">备注：${textValue(record.note)}</div>
+      </div>
+
+      <div class="work-sheet-sign">
+        <span>客户确认：</span>
+        <span>日期：　　 年　　 月　　 日</span>
+      </div>
       </div>
     </div>
   `;
@@ -395,12 +475,17 @@ export function renderInbound(state, auth) {
 
       ${formOpen ? inboundForm : ""}
 
-      <section class="panel">
+      <section class="panel inbound-detail-panel">
         <div class="panel-header">
           <div>
             <h3>单据详情</h3>
             <p>点击表格里的查看后，这里会显示完整的接单单据内容。</p>
           </div>
+          ${selectedRecord ? `
+            <button class="btn ghost" type="button" data-action="print-inbound">
+              打印单据
+            </button>
+          ` : ""}
         </div>
         ${renderInboundDetail(selectedRecord)}
       </section>

@@ -591,6 +591,11 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (action === "print-inbound") {
+    window.print();
+    return;
+  }
+
   if (action === "inbound-new") {
     if (!ensureCanEdit("inbound")) return;
     setUi({
