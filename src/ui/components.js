@@ -71,12 +71,15 @@ export function renderCheckboxGroup(name, label, options, selectedValues = [], d
       <div class="check-grid">
         ${options
           .map(
-            (option) => `
+            (option, index) => {
+              const id = `${name}-${String(index + 1).padStart(2, "0")}-${String(option.value).replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, "")}`;
+              return `
               <label class="check-item">
-                <input type="checkbox" name="${escapeHtml(name)}" value="${escapeHtml(option.value)}" ${values.has(String(option.value)) ? "checked" : ""} />
+                <input id="${escapeHtml(id)}" type="checkbox" name="${escapeHtml(name)}" value="${escapeHtml(option.value)}" ${values.has(String(option.value)) ? "checked" : ""} />
                 <span>${escapeHtml(option.label)}</span>
               </label>
-            `,
+            `;
+            },
           )
           .join("")}
       </div>

@@ -545,6 +545,48 @@ tr:hover td {
   margin-bottom: 4px;
 }
 
+.detail-sheet {
+  display: grid;
+  gap: 12px;
+}
+
+.detail-section {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f8fafc;
+  display: grid;
+  gap: 10px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.detail-item {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.detail-item span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.detail-item strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .flow {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -744,7 +786,8 @@ tr:hover td {
   }
 
   .field-grid,
-  .kpi-grid {
+  .kpi-grid,
+  .detail-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -63,28 +63,74 @@ function listOf(value) {
     .filter(Boolean);
 }
 
-function buildDetail(item) {
-  return `${item.customerName || "-"} · ${item.productSpec || "-"}`;
+function detailValue(value) {
+  if (Array.isArray(value)) return value.length ? value.join("、") : "未填写";
+  if (value === 0) return "0";
+  return value ? String(value) : "未填写";
 }
 
-function buildProcessText(item) {
-  const processes = listOf(item.processes);
-  const shapes = listOf(item.shapes);
-  const binOptions = listOf(item.binOptions);
-  const electrodeOptions = listOf(item.electrodeOptions);
-  const labelFormats = listOf(item.labelFormats);
-  const labelSizes = listOf(item.labelSizes);
-  const labelPositions = listOf(item.labelPositions);
-  const defectOptions = listOf(item.defectOptions);
-  const processParts = processes.length ? processes.join("、") : "未填写";
-  const shapeText = shapes.length ? shapes.join("、") : "未填写";
-  const binText = binOptions.length ? binOptions.join("、") : "未填写";
-  const electrodeText = electrodeOptions.length ? electrodeOptions.join("、") : "未填写";
-  const labelText = labelFormats.length ? labelFormats.join("、") : "未填写";
-  const labelSizeText = labelSizes.length ? labelSizes.join("、") : "未填写";
-  const labelPosText = labelPositions.length ? labelPositions.join("、") : "未填写";
-  const defectText = defectOptions.length ? defectOptions.join("、") : "未填写";
-  return `加工方式：${processParts}；形状：${shapeText}；Bin：${binText}；电极：${electrodeText}；标签：${labelText} / ${labelSizeText} / ${labelPosText}；不良处理：${defectText}`;
+function renderDetailItem(label, value) {
+  return `
+    <div class="detail-item">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(detailValue(value))}</strong>
+    </div>
+  `;
+}
+
+function renderInboundDetail(record) {
+  if (!record) return `<div class="empty">暂无记录</div>`;
+
+  return `
+    <div class="detail-sheet" id="inbound-detail">
+      <div class="detail-section">
+        <div class="section-title">客户 / 订单信息</div>
+        <div class="detail-grid">
+          ${renderDetailItem("客户名称", record.customerName)}
+          ${renderDetailItem("来料日期", formatDate(record.orderDate || record.date))}
+          ${renderDetailItem("订单编号", record.orderNo)}
+          ${renderDetailItem("品名 / 规格", record.productSpec)}
+          ${renderDetailItem("订单数量", `${formatNumber(record.orderQty || 0)} ${record.unit || ""}`)}
+          ${renderDetailItem("单价", record.unitPrice)}
+          ${renderDetailItem("金额", record.amount)}
+          ${renderDetailItem("交货日期", formatDate(record.deliveryDate))}
+        </div>
+      </div>
+      <div class="detail-section">
+        <div class="section-title">加工方式</div>
+        <div class="detail-grid">
+          ${renderDetailItem("加工方式", listOf(record.processes))}
+          ${renderDetailItem("形状要求", listOf(record.shapes))}
+        </div>
+      </div>
+      <div class="detail-section">
+        <div class="section-title">测试 / 分选标准</div>
+        <div class="detail-grid">
+          ${renderDetailItem("测试电流", record.testCurrent)}
+          ${renderDetailItem("VZ", record.vz)}
+          ${renderDetailItem("VF3", record.vf3)}
+          ${renderDetailItem("IR", record.ir)}
+          ${renderDetailItem("测试标准档案名称", record.testStandardName)}
+          ${renderDetailItem("分选要求", record.sortingRequirement)}
+        </div>
+      </div>
+      <div class="detail-section">
+        <div class="section-title">标签打印 / 不良处理</div>
+        <div class="detail-grid">
+          ${renderDetailItem("Bin 选择", listOf(record.binOptions))}
+          ${renderDetailItem("表面电极卡控", listOf(record.electrodeOptions))}
+          ${renderDetailItem("成品标签格式", listOf(record.labelFormats))}
+          ${renderDetailItem("成品标签尺寸", listOf(record.labelSizes))}
+          ${renderDetailItem("成品贴标位置", listOf(record.labelPositions))}
+          ${renderDetailItem("不良处理", listOf(record.defectOptions))}
+        </div>
+      </div>
+      <div class="detail-section">
+        <div class="section-title">备注</div>
+        <div class="small">${escapeHtml(record.note || "未填写")}</div>
+      </div>
+    </div>
+  `;
 }
 
 function defaultFormValues(record = {}) {
@@ -190,28 +236,28 @@ export function renderInbound(state, auth) {
               <div class="section-title">测试 / 分选标准</div>
               <div class="field-grid">
                 <div class="field">
-                  <label>测试电流</label>
-                  <input name="testCurrent" type="text" value="${escapeHtml(formValues.testCurrent || "")}" placeholder="例如：150 mA" />
+                  <label for="testCurrent">测试电流</label>
+                  <input id="testCurrent" name="testCurrent" type="text" value="${escapeHtml(formValues.testCurrent || "")}" placeholder="例如：150 mA" />
                 </div>
                 <div class="field">
-                  <label>VZ</label>
-                  <input name="vz" type="text" value="${escapeHtml(formValues.vz || "")}" placeholder="例如：uA" />
+                  <label for="vz">VZ</label>
+                  <input id="vz" name="vz" type="text" value="${escapeHtml(formValues.vz || "")}" placeholder="例如：uA" />
                 </div>
                 <div class="field">
-                  <label>VF3</label>
-                  <input name="vf3" type="text" value="${escapeHtml(formValues.vf3 || "")}" placeholder="例如：uA" />
+                  <label for="vf3">VF3</label>
+                  <input id="vf3" name="vf3" type="text" value="${escapeHtml(formValues.vf3 || "")}" placeholder="例如：uA" />
                 </div>
                 <div class="field">
-                  <label>IR</label>
-                  <input name="ir" type="text" value="${escapeHtml(formValues.ir || "")}" placeholder="例如：V" />
+                  <label for="ir">IR</label>
+                  <input id="ir" name="ir" type="text" value="${escapeHtml(formValues.ir || "")}" placeholder="例如：V" />
                 </div>
                 <div class="field full">
-                  <label>测试标准档案名称</label>
-                  <input name="testStandardName" type="text" value="${escapeHtml(formValues.testStandardName || "")}" />
+                  <label for="testStandardName">测试标准档案名称</label>
+                  <input id="testStandardName" name="testStandardName" type="text" value="${escapeHtml(formValues.testStandardName || "")}" />
                 </div>
                 <div class="field full">
-                  <label>分选要求</label>
-                  <input name="sortingRequirement" type="text" value="${escapeHtml(formValues.sortingRequirement || "")}" />
+                  <label for="sortingRequirement">分选要求</label>
+                  <input id="sortingRequirement" name="sortingRequirement" type="text" value="${escapeHtml(formValues.sortingRequirement || "")}" />
                 </div>
               </div>
             </section>
@@ -239,26 +285,11 @@ export function renderInbound(state, auth) {
       <aside class="panel">
         <div class="panel-header">
           <div>
-            <h3>单据摘要</h3>
-            <p>这个摘要区可以逐步演变成完整的接单单据预览，方便后面打印或导出。</p>
+            <h3>单据详情</h3>
+            <p>点击表格里的查看后，这里会显示完整的接单单据内容。</p>
           </div>
         </div>
-        ${selectedRecord ? `
-          <div class="mini-list">
-            <div class="mini-item">
-              <strong>${escapeHtml(selectedRecord.customerName)}</strong>
-              <div class="small">${escapeHtml(buildDetail(selectedRecord))}</div>
-            </div>
-            <div class="mini-item">
-              <strong>加工方式</strong>
-              <div class="small">${escapeHtml(buildProcessText(selectedRecord))}</div>
-            </div>
-            <div class="mini-item">
-              <strong>创建/更新</strong>
-              <div class="small">${escapeHtml(selectedRecord.updatedAt || selectedRecord.orderDate)}</div>
-            </div>
-          </div>
-        ` : `<div class="empty">暂无记录</div>`}
+        ${renderInboundDetail(selectedRecord)}
       </aside>
     </div>
   `;

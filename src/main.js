@@ -453,6 +453,7 @@ document.addEventListener("click", (event) => {
       inboundEditingId: null,
     });
     render();
+    document.getElementById("inbound-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
