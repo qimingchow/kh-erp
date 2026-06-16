@@ -58,6 +58,8 @@ const INSPECTION_OPTIONS = [
   { label: "严格电极目检", value: "严格电极目检" },
 ];
 
+const TEST_STANDARD_PROCESSES = ["测试", "抽测出图", "测试出图"];
+
 function listOf(value) {
   if (Array.isArray(value)) return value;
   if (!value) return [];
@@ -65,6 +67,15 @@ function listOf(value) {
     .split(/[、,，;；]/)
     .map((part) => part.trim())
     .filter(Boolean);
+}
+
+function usesTestStandard(processes) {
+  const values = listOf(processes);
+  return TEST_STANDARD_PROCESSES.some((item) => values.includes(item));
+}
+
+function usesSortingStandard(processes) {
+  return listOf(processes).includes("分选");
 }
 
 function detailValue(value) {
@@ -82,6 +93,32 @@ function renderDetailItem(label, value) {
   `;
 }
 
+function renderBinOptions(selectedValues = [], binOther = "") {
+  const values = new Set((selectedValues || []).map((value) => String(value)));
+  return `
+    <section class="check-panel">
+      <div class="check-panel-head">
+        <div class="check-panel-title">Bin 选择</div>
+      </div>
+      <div class="check-grid">
+        ${BIN_OPTIONS.map((option, index) => {
+          const id = `binOptions-${String(index + 1).padStart(2, "0")}-${String(option.value)}`;
+          return `
+            <label class="check-item">
+              <input id="${escapeHtml(id)}" type="checkbox" name="binOptions" value="${escapeHtml(option.value)}" ${values.has(String(option.value)) ? "checked" : ""} />
+              <span>${escapeHtml(option.label)}</span>
+            </label>
+          `;
+        }).join("")}
+      </div>
+      <div class="field full">
+        <label for="binOther">其他</label>
+        <input id="binOther" name="binOther" type="text" value="${escapeHtml(binOther || "")}" placeholder="按客户要求填写" />
+      </div>
+    </section>
+  `;
+}
+
 function renderTextField(name, label, value, options = {}) {
   const fullClass = options.full ? " full" : "";
   const placeholder = options.placeholder || "";
@@ -96,6 +133,8 @@ function renderTextField(name, label, value, options = {}) {
 
 function renderInboundDetail(record) {
   if (!record) return `<div class="empty">暂无记录</div>`;
+  const showTestStandard = usesTestStandard(record.processes);
+  const showSortingStandard = usesSortingStandard(record.processes);
 
   return `
     <div class="detail-sheet" id="inbound-detail">
@@ -119,6 +158,7 @@ function renderInboundDetail(record) {
           ${renderDetailItem("形状要求", listOf(record.shapes))}
         </div>
       </div>
+      ${showTestStandard ? `
       <div class="detail-section">
         <div class="section-title">测试标准</div>
         <div class="detail-grid">
@@ -130,6 +170,8 @@ function renderInboundDetail(record) {
           ${renderDetailItem("测试标准档案名称", record.testStandardName)}
         </div>
       </div>
+      ` : ""}
+      ${showSortingStandard ? `
       <div class="detail-section">
         <div class="section-title">分选标准</div>
         <div class="detail-grid">
@@ -144,6 +186,7 @@ function renderInboundDetail(record) {
           ${renderDetailItem("其他", record.sortingOther || record.sortingRequirement)}
         </div>
       </div>
+      ` : ""}
       <div class="detail-section">
         <div class="section-title">目检标准</div>
         <div class="detail-grid">
@@ -218,6 +261,8 @@ export function renderInbound(state, auth) {
     inspectionOptions: listOf(formRecord?.inspectionOptions),
     currentEditId: formRecord?.id || "",
   };
+  const showTestStandard = usesTestStandard(formValues.processes);
+  const showSortingStandard = usesSortingStandard(formValues.processes);
 
   const formFields = [
     { name: "customerName", label: "客户名称", placeholder: "例如：深圳市金凯半导体科技有限公司" },
@@ -277,7 +322,7 @@ export function renderInbound(state, auth) {
               ${renderCheckboxGroup("processes", "加工方式", PROCESS_OPTIONS, formValues.processes, "多选")}
               ${renderCheckboxGroup("shapes", "形状要求", SHAPE_OPTIONS, formValues.shapes, "适用于分选要求")}
             </section>
-            <section class="sheet-section">
+            <section class="sheet-section conditional-section" data-standard-section="test" ${showTestStandard ? "" : "hidden"}>
               <div class="section-title">测试标准</div>
               <div class="field-grid">
                 ${renderTextField("testCurrent", "测试电流", formValues.testCurrent, { placeholder: "例如：150 mA" })}
@@ -288,7 +333,7 @@ export function renderInbound(state, auth) {
                 ${renderTextField("testStandardName", "测试标准档案名称", formValues.testStandardName, { full: true, required: false })}
               </div>
             </section>
-            <section class="sheet-section">
+            <section class="sheet-section conditional-section" data-standard-section="sorting" ${showSortingStandard ? "" : "hidden"}>
               <div class="section-title">分选标准</div>
               <div class="field-grid">
                 ${renderTextField("sortingVf1", "VF1", formValues.sortingVf1, { placeholder: "例如：2.8-2.9-3.1", required: false })}
@@ -296,10 +341,9 @@ export function renderInbound(state, auth) {
                 ${renderTextField("sortingLop", "LOP", formValues.sortingLop, { placeholder: "例如：230-250-300", required: false })}
                 ${renderTextField("sortingWld", "WLD", formValues.sortingWld, { placeholder: "例如：447.5-450-452.5", required: false })}
                 ${renderTextField("sortingIr", "IR", formValues.sortingIr, { placeholder: "例如：0-0.5", required: false })}
-                ${renderTextField("binOther", "Bin 其他", formValues.binOther, { placeholder: "按客户要求填写", required: false })}
                 ${renderTextField("sortingOther", "其他", formValues.sortingOther || formValues.sortingRequirement, { full: true, required: false })}
               </div>
-              ${renderCheckboxGroup("binOptions", "Bin 选择", BIN_OPTIONS, formValues.binOptions, "")}
+              ${renderBinOptions(formValues.binOptions, formValues.binOther)}
               ${renderCheckboxGroup("electrodeOptions", "表面电极卡控", ELECTRODE_OPTIONS, formValues.electrodeOptions, "")}
             </section>
             <section class="sheet-section">

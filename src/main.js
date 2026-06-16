@@ -179,6 +179,30 @@ function paintIcons() {
   });
 }
 
+function syncInboundStandardSections(root = document) {
+  const form = root.querySelector?.('form[data-form="inbound"]');
+  if (!form) return;
+
+  const selectedProcesses = new Set(
+    Array.from(form.querySelectorAll('input[name="processes"]:checked')).map((item) => item.value),
+  );
+  const showTest = ["测试", "抽测出图", "测试出图"].some((item) => selectedProcesses.has(item));
+  const showSorting = selectedProcesses.has("分选");
+  const visibility = {
+    test: showTest,
+    sorting: showSorting,
+  };
+
+  form.querySelectorAll("[data-standard-section]").forEach((section) => {
+    const key = section.getAttribute("data-standard-section");
+    const visible = Boolean(visibility[key]);
+    section.hidden = !visible;
+    section.querySelectorAll("input, select, textarea, button").forEach((control) => {
+      control.disabled = !visible;
+    });
+  });
+}
+
 function render() {
   const state = getState();
   const auth = getAuth();
@@ -188,6 +212,7 @@ function render() {
   renderKpis(state);
   renderMain(state);
   paintIcons();
+  syncInboundStandardSections();
   window.__kunheBooted = true;
 }
 
@@ -645,6 +670,12 @@ document.addEventListener("click", (event) => {
     mutateState((draft) => updateMachine(draft, button.getAttribute("data-machine"), { progress: 100, status: "待机", updatedAt: timestampNow() }));
     render();
   }
+});
+
+document.addEventListener("change", (event) => {
+  const input = event.target.closest('form[data-form="inbound"] input[name="processes"]');
+  if (!input) return;
+  syncInboundStandardSections();
 });
 
 document.addEventListener("submit", (event) => {
