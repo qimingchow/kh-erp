@@ -61,10 +61,10 @@ export function getMachineName(state, id) {
   return state.machines.find((item) => item.id === id)?.name || "未指定";
 }
 
-export function createInbound(state, formData) {
+export function inboundRecordFromForm(formData) {
   const id = String(formData.get("id") || "").trim();
   const orderDate = formData.get("orderDate") || todayString();
-  const record = {
+  return {
     id: id || makeId("in"),
     customerName: formData.get("customerName"),
     date: orderDate,
@@ -103,6 +103,11 @@ export function createInbound(state, formData) {
     sortingRequirement: formData.get("sortingRequirement") || formData.get("sortingOther") || "",
     updatedAt: timestampNow(),
   };
+}
+
+export function createInbound(state, formData) {
+  const id = String(formData.get("id") || "").trim();
+  const record = inboundRecordFromForm(formData);
 
   const existing = id ? state.inbound.find((item) => item.id === id) : null;
 
@@ -130,7 +135,7 @@ export function deleteInbound(state, id) {
   return { ok: true };
 }
 
-export function createInventory(state, formData) {
+export function inventoryRecordFromForm(state, formData) {
   const id = String(formData.get("id") || "").trim();
   const code = String(formData.get("code") || "").trim();
   const record = {
@@ -149,6 +154,12 @@ export function createInventory(state, formData) {
     lastUpdate: todayString(),
   };
   record.status = normalizeInventoryStatus(record);
+  return record;
+}
+
+export function createInventory(state, formData) {
+  const id = String(formData.get("id") || "").trim();
+  const record = inventoryRecordFromForm(state, formData);
 
   const existing = id
     ? state.inventory.find((item) => item.id === id)

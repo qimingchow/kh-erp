@@ -6,6 +6,7 @@ export const NAV_ITEMS = [
   { key: "production", label: "生产计划", desc: "工单、交期、排产、进度" },
   { key: "machine", label: "机台看板", desc: "分选机、测试机和设备状态" },
   { key: "finance", label: "财务记录", desc: "应收、应付、收款、付款" },
+  { key: "users", label: "用户权限", desc: "账号、角色、模块权限" },
   { key: "roadmap", label: "扩展路线", desc: "后续还能补哪些功能" },
 ];
 
@@ -18,6 +19,7 @@ export function getViewIcon(key) {
     production: "calendar",
     machine: "monitor",
     finance: "landmark",
+    users: "users",
     roadmap: "sparkle",
   };
   return iconMap[key] || "dashboard";

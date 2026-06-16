@@ -5,6 +5,15 @@ export const ROLE_LABELS = {
   clerk: "录单人员",
 };
 
+export const RESOURCE_LABELS = {
+  inbound: "来料录入",
+  inventory: "库存管理",
+  outbound: "出库记录",
+  production: "生产计划",
+  machine: "机台看板",
+  finance: "财务记录",
+};
+
 export const USER_SEED = {
   activeUserId: null,
   users: [
@@ -14,6 +23,8 @@ export const USER_SEED = {
       password: "admin123",
       name: "系统管理员",
       role: "admin",
+      active: true,
+      editableResources: Object.keys(RESOURCE_LABELS),
     },
     {
       id: "u-clerk",
@@ -21,6 +32,8 @@ export const USER_SEED = {
       password: "clerk123",
       name: "录单员",
       role: "clerk",
+      active: true,
+      editableResources: ["inbound"],
     },
   ],
 };
@@ -34,6 +47,8 @@ export const SEED_STATE = {
     inventoryViewingId: null,
     outboundEditingId: null,
     outboundViewingId: null,
+    userEditingId: null,
+    userViewingId: null,
   },
   inbound: [
     {

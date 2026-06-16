@@ -1,11 +1,15 @@
 import { NAV_ITEMS, getViewIcon } from "./data/navigation.js";
-import { ROLE_LABELS } from "./data/seed.js";
+import { RESOURCE_LABELS, ROLE_LABELS } from "./data/seed.js";
 import {
   canEdit,
   clearUi,
+  applyServerBootstrap,
+  deleteUserLocal,
   getAuth,
+  getAuthToken,
   getCurrentUser,
   getState,
+  saveUserLocal,
   login,
   logout,
   mutateState,
@@ -25,7 +29,22 @@ import {
   deleteInventory,
   deleteOutbound,
   updateMachine,
+  inboundRecordFromForm,
+  inventoryRecordFromForm,
 } from "./domain/actions.js";
+import {
+  bootstrap,
+  deleteInboundRemote,
+  deleteInventoryRemote,
+  deleteUserRemote,
+  isServerMode,
+  loginRemote,
+  logoutRemote,
+  resetRemote,
+  saveInboundRemote,
+  saveInventoryRemote,
+  saveUserRemote,
+} from "./lib/api.js";
 import { renderOverview } from "./views/overview.js";
 import { renderInbound } from "./views/inbound.js";
 import { renderInventory } from "./views/inventory.js";
@@ -33,6 +52,7 @@ import { renderOutbound } from "./views/outbound.js";
 import { renderProduction } from "./views/production.js";
 import { renderMachine } from "./views/machine.js";
 import { renderFinance } from "./views/finance.js";
+import { renderUsers } from "./views/users.js";
 import { renderRoadmap } from "./views/roadmap.js";
 
 const elements = {
@@ -50,6 +70,7 @@ const FORM_RESOURCE = {
   outbound: "outbound",
   production: "production",
   finance: "finance",
+  user: "users",
 };
 
 function currentNav(state) {
@@ -57,7 +78,9 @@ function currentNav(state) {
 }
 
 function renderNav(state) {
-  elements.nav.innerHTML = NAV_ITEMS.map(
+  const currentUser = getCurrentUser();
+  const items = NAV_ITEMS.filter((item) => item.key !== "users" || currentUser?.role === "admin");
+  elements.nav.innerHTML = items.map(
     (item) => `
       <button class="nav-item ${state.active === item.key ? "active" : ""}" data-action="nav" data-view="${item.key}" type="button">
         <span class="icon">${icon(getViewIcon(item.key))}</span>
@@ -75,7 +98,7 @@ function renderAuthBar(auth, currentUser) {
     elements.auth.innerHTML = `
       <div class="auth-meta">
         <div class="auth-title">${escapeHtml(currentUser.name)} · ${escapeHtml(ROLE_LABELS[currentUser.role] || currentUser.role)}</div>
-        <div class="auth-sub">当前账号：${escapeHtml(currentUser.username)}，${currentUser.role === "admin" ? "拥有全部操作权限" : "可查看、新增和编辑来料单"}</div>
+        <div class="auth-sub">当前账号：${escapeHtml(currentUser.username)}，${currentUser.role === "admin" ? "拥有全部操作权限" : `可编辑：${escapeHtml((currentUser.editableResources || ["inbound"]).map((item) => RESOURCE_LABELS[item] || item).join("、"))}`}</div>
       </div>
       <div class="auth-actions">
         <button class="btn ghost" data-action="logout" type="button">退出登录</button>
@@ -84,17 +107,23 @@ function renderAuthBar(auth, currentUser) {
     return;
   }
 
+  const localQuickButtons = isServerMode()
+    ? ""
+    : `
+      <button class="btn ghost" type="button" data-action="quick-login" data-username="admin" data-password="admin123">管理员</button>
+      <button class="btn ghost" type="button" data-action="quick-login" data-username="clerk" data-password="clerk123">录单人员</button>
+    `;
+
   elements.auth.innerHTML = `
     <div class="auth-meta">
       <div class="auth-title">登录账号</div>
-      <div class="auth-sub">管理员：admin / admin123；录单人员：clerk / clerk123</div>
+      <div class="auth-sub">${isServerMode() ? "服务器模式已启用，数据将保存到后端。" : "当前为本地预览模式，数据只保存在浏览器。管理员：admin / admin123；录单人员：clerk / clerk123"}</div>
     </div>
     <form class="auth-actions login-form" data-form="login">
       <input name="username" type="text" placeholder="账号" autocomplete="username" required />
       <input name="password" type="password" placeholder="密码" autocomplete="current-password" required />
       <button class="btn primary" type="submit">登录</button>
-      <button class="btn ghost" type="button" data-action="quick-login" data-username="admin" data-password="admin123">管理员</button>
-      <button class="btn ghost" type="button" data-action="quick-login" data-username="clerk" data-password="clerk123">录单人员</button>
+      ${localQuickButtons}
     </form>
   `;
 }
@@ -156,6 +185,9 @@ function renderMain(state) {
       case "finance":
         elements.main.innerHTML = renderFinance(state);
         break;
+      case "users":
+        elements.main.innerHTML = renderUsers(state, { currentUser, users: getAuth().users });
+        break;
       case "roadmap":
         elements.main.innerHTML = renderRoadmap(state);
         break;
@@ -214,6 +246,20 @@ function render() {
   paintIcons();
   syncInboundStandardSections();
   window.__kunheBooted = true;
+}
+
+function assignRecordState(payload) {
+  if (!payload?.state) return;
+  applyServerBootstrap(payload);
+}
+
+async function syncFromServer() {
+  try {
+    const payload = await bootstrap(getAuthToken());
+    assignRecordState(payload);
+  } catch {
+    // no-op; local fallback remains available
+  }
 }
 
 function listText(value) {
@@ -439,6 +485,18 @@ function ensureCanEdit(resource) {
   return false;
 }
 
+function userPayloadFromForm(formData) {
+  return {
+    id: String(formData.get("id") || "").trim(),
+    username: String(formData.get("username") || "").trim(),
+    name: String(formData.get("name") || "").trim(),
+    password: String(formData.get("password") || ""),
+    role: formData.get("role") === "admin" ? "admin" : "clerk",
+    active: formData.get("active") !== "false",
+    editableResources: formData.getAll("editableResources"),
+  };
+}
+
 document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-action]");
   if (!button) return;
@@ -453,21 +511,56 @@ document.addEventListener("click", (event) => {
   }
 
   if (action === "restore-seed") {
-    restoreSeed();
-    render();
+    if (isServerMode()) {
+      const token = getAuthToken();
+      resetRemote(token)
+        .then((payload) => {
+          applyServerBootstrap(payload);
+          render();
+        })
+        .catch((error) => alert(error.message || "恢复失败"));
+    } else {
+      restoreSeed();
+      render();
+    }
     return;
   }
 
   if (action === "logout") {
-    logout();
-    render();
+    if (isServerMode()) {
+      logoutRemote(getAuthToken())
+        .then((payload) => {
+          applyServerBootstrap(payload);
+        })
+        .catch(() => {
+          logout();
+        })
+        .finally(() => {
+          render();
+        });
+    } else {
+      logout();
+      render();
+    }
     return;
   }
 
   if (action === "quick-login") {
-    const result = login(button.getAttribute("data-username"), button.getAttribute("data-password"));
-    if (result.ok === false) alert(result.message || "登录失败");
-    render();
+    const username = button.getAttribute("data-username");
+    const password = button.getAttribute("data-password");
+    const runner = isServerMode() ? loginRemote(username, password) : Promise.resolve(login(username, password));
+    runner
+      .then((payload) => {
+        if (payload?.ok === false) {
+          alert(payload.message || "登录失败");
+          return;
+        }
+        if (payload?.state) {
+          applyServerBootstrap(payload);
+        }
+        render();
+      })
+      .catch((error) => alert(error.message || "登录失败"));
     return;
   }
 
@@ -525,9 +618,22 @@ document.addEventListener("click", (event) => {
       }, 3000);
       return;
     }
-    const result = mutateState((draft) => deleteInbound(draft, button.getAttribute("data-id")));
-    if (result.ok === false) alert(result.message || "删除失败");
-    render();
+    const id = button.getAttribute("data-id");
+    const afterDelete = () => {
+      if (isServerMode()) {
+        deleteInboundRemote(id, getAuthToken())
+          .then((payload) => {
+            assignRecordState(payload);
+            render();
+          })
+          .catch((error) => alert(error.message || "删除失败"));
+      } else {
+        const result = mutateState((draft) => deleteInbound(draft, id));
+        if (result.ok === false) alert(result.message || "删除失败");
+        render();
+      }
+    };
+    afterDelete();
     return;
   }
 
@@ -574,9 +680,19 @@ document.addEventListener("click", (event) => {
       }, 3000);
       return;
     }
-    const result = mutateState((draft) => deleteInventory(draft, button.getAttribute("data-id")));
-    if (result.ok === false) alert(result.message || "删除失败");
-    render();
+    const id = button.getAttribute("data-id");
+    if (isServerMode()) {
+      deleteInventoryRemote(id, getAuthToken())
+        .then((payload) => {
+          assignRecordState(payload);
+          render();
+        })
+        .catch((error) => alert(error.message || "删除失败"));
+    } else {
+      const result = mutateState((draft) => deleteInventory(draft, id));
+      if (result.ok === false) alert(result.message || "删除失败");
+      render();
+    }
     return;
   }
 
@@ -670,6 +786,51 @@ document.addEventListener("click", (event) => {
     mutateState((draft) => updateMachine(draft, button.getAttribute("data-machine"), { progress: 100, status: "待机", updatedAt: timestampNow() }));
     render();
   }
+
+  if (action === "user-view") {
+    setUi({ userViewingId: button.getAttribute("data-id"), userEditingId: null });
+    render();
+    return;
+  }
+
+  if (action === "user-edit") {
+    if (!ensureCanEdit("users")) return;
+    setUi({ userViewingId: button.getAttribute("data-id"), userEditingId: button.getAttribute("data-id") });
+    render();
+    document.querySelector('form[data-form="user"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  if (action === "user-cancel") {
+    clearUi(["userEditingId"]);
+    render();
+    return;
+  }
+
+  if (action === "user-delete") {
+    if (!ensureCanEdit("users")) return;
+    if (button.getAttribute("data-confirmed") !== "true") {
+      button.setAttribute("data-confirmed", "true");
+      button.textContent = "确认删除";
+      window.setTimeout(() => {
+        if (!button.isConnected) return;
+        button.removeAttribute("data-confirmed");
+        button.textContent = "删除";
+      }, 3000);
+      return;
+    }
+    const id = button.getAttribute("data-id");
+    const commit = isServerMode()
+      ? deleteUserRemote(id, getAuthToken())
+      : Promise.resolve(deleteUserLocal(id));
+    commit
+      .then((payload) => {
+        if (payload?.state) applyServerBootstrap(payload);
+        render();
+      })
+      .catch((error) => alert(error.message || "删除失败"));
+    return;
+  }
 });
 
 document.addEventListener("change", (event) => {
@@ -687,17 +848,55 @@ document.addEventListener("submit", (event) => {
   const formKey = form.getAttribute("data-form");
 
   if (formKey === "login") {
-    const result = login(formData.get("username"), formData.get("password"));
-    if (result.ok === false) {
-      alert(result.message || "登录失败");
-      return;
-    }
-    render();
+    const username = formData.get("username");
+    const password = formData.get("password");
+    const runner = isServerMode() ? loginRemote(username, password) : Promise.resolve(login(username, password));
+    runner
+      .then((payload) => {
+        if (payload?.ok === false) {
+          alert(payload.message || "登录失败");
+          return;
+        }
+        if (payload?.state) applyServerBootstrap(payload);
+        render();
+      })
+      .catch((error) => alert(error.message || "登录失败"));
     return;
   }
 
   const resource = FORM_RESOURCE[formKey];
   if (resource && !ensureCanEdit(resource)) return;
+
+  if (formKey === "user") {
+    const userPayload = userPayloadFromForm(formData);
+    const runner = isServerMode()
+      ? saveUserRemote(userPayload, getAuthToken())
+      : Promise.resolve(saveUserLocal(userPayload));
+    runner
+      .then((payload) => {
+        if (payload?.ok === false) {
+          alert(payload.message || "保存失败");
+          return;
+        }
+        if (payload?.state) applyServerBootstrap(payload);
+        clearUi(["userEditingId"]);
+        render();
+      })
+      .catch((error) => alert(error.message || "保存失败"));
+    return;
+  }
+
+  if (isServerMode() && (formKey === "inbound" || formKey === "inventory")) {
+    const record = formKey === "inbound" ? inboundRecordFromForm(formData) : inventoryRecordFromForm(getState(), formData);
+    const runner = formKey === "inbound" ? saveInboundRemote(record, getAuthToken()) : saveInventoryRemote(record, getAuthToken());
+    runner
+      .then((payload) => {
+        applyServerBootstrap(payload);
+        render();
+      })
+      .catch((error) => alert(error.message || "保存失败"));
+    return;
+  }
 
   const result = mutateState((draft) => {
     if (formKey === "inbound") return createInbound(draft, formData);
@@ -716,4 +915,4 @@ document.addEventListener("submit", (event) => {
   render();
 });
 
-render();
+syncFromServer().finally(() => render());

@@ -3,9 +3,12 @@ import { clone, todayString } from "./format.js";
 
 const STORAGE_KEY = "kunhe-semiconductor-erp-v2";
 const USER_STORAGE_KEY = "kunhe-semiconductor-erp-user-v2";
+const TOKEN_STORAGE_KEY = "kunhe-semiconductor-erp-token-v2";
 
 let state = loadState();
 let auth = loadAuth();
+let authToken = localStorage.getItem(TOKEN_STORAGE_KEY) || "";
+let remoteAuthMode = false;
 
 function loadState() {
   const raw = localStorage.getItem(STORAGE_KEY);
@@ -242,7 +245,46 @@ export function getAuth() {
   return auth;
 }
 
+export function getAuthToken() {
+  return authToken;
+}
+
+export function setAuthToken(token = "") {
+  authToken = token || "";
+  if (authToken) {
+    localStorage.setItem(TOKEN_STORAGE_KEY, authToken);
+  } else {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+  }
+}
+
+export function applyServerBootstrap(payload) {
+  remoteAuthMode = Boolean(payload?.serverMode);
+  if (payload?.state) {
+    const previousActive = state.active;
+    const previousUi = state.ui || {};
+    const incoming = migrateState(payload.state);
+    state = {
+      ...incoming,
+      active: previousActive || incoming.active,
+      ui: {
+        ...(previousUi || {}),
+        ...(incoming.ui || {}),
+      },
+    };
+  }
+  if (payload?.auth) {
+    auth = {
+      activeUserId: payload.auth.activeUserId || payload.currentUser?.id || null,
+      users: Array.isArray(payload.auth.users) ? payload.auth.users : payload.currentUser ? [payload.currentUser] : [],
+    };
+  }
+  if (Object.prototype.hasOwnProperty.call(payload || {}, "token")) setAuthToken(payload.token || "");
+  saveState();
+}
+
 export function saveState() {
+  if (remoteAuthMode) return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(auth));
 }
@@ -276,11 +318,13 @@ export function mutateState(mutator) {
 export function restoreSeed() {
   state = clone(SEED_STATE);
   auth = clone(USER_SEED);
+  remoteAuthMode = false;
+  setAuthToken("");
   saveState();
 }
 
 export function login(username, password) {
-  const user = auth.users.find((item) => item.username === username && item.password === password);
+  const user = auth.users.find((item) => item.username === username && item.password === password && item.active !== false);
   if (!user) return { ok: false, message: "账号或密码错误" };
   auth.activeUserId = user.id;
   saveState();
@@ -289,15 +333,81 @@ export function login(username, password) {
 
 export function logout() {
   auth.activeUserId = null;
+  setAuthToken("");
   saveState();
 }
 
 export function getCurrentUser() {
-  return auth.users.find((item) => item.id === auth.activeUserId) || null;
+  return auth.users.find((item) => item.id === auth.activeUserId && item.active !== false) || null;
 }
 
 export function canEdit(user, resource) {
   if (!user) return false;
   if (user.role === "admin") return true;
+  if (Array.isArray(user.editableResources)) return user.editableResources.includes(resource);
   return resource === "inbound";
+}
+
+function localId(prefix) {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+export function saveUserLocal(payload) {
+  const id = String(payload.id || "").trim();
+  const username = String(payload.username || "").trim();
+  const name = String(payload.name || "").trim();
+  const role = payload.role === "admin" ? "admin" : "clerk";
+  const editableResources = role === "admin" ? ["inbound", "inventory", "outbound", "production", "machine", "finance"] : payload.editableResources || ["inbound"];
+  const active = payload.active !== false && payload.active !== "false";
+
+  if (!username) return { ok: false, message: "请填写账号。" };
+  if (!name) return { ok: false, message: "请填写姓名。" };
+  if (auth.users.some((item) => item.username === username && item.id !== id)) {
+    return { ok: false, message: "账号已存在。" };
+  }
+
+  if (id) {
+    const existing = auth.users.find((item) => item.id === id);
+    if (!existing) return { ok: false, message: "用户不存在。" };
+    if (existing.id === auth.activeUserId && !active) return { ok: false, message: "不能停用当前登录账号。" };
+    if (existing.id === auth.activeUserId && existing.role === "admin" && role !== "admin") {
+      return { ok: false, message: "不能把当前管理员账号改成录单人员。" };
+    }
+    Object.assign(existing, {
+      username,
+      name,
+      role,
+      active,
+      editableResources,
+      updatedAt: todayString(),
+    });
+    if (payload.password) existing.password = String(payload.password);
+    saveState();
+    return { ok: true, user: existing };
+  }
+
+  if (!payload.password) return { ok: false, message: "新建用户需要填写初始密码。" };
+  const user = {
+    id: localId("u"),
+    username,
+    password: String(payload.password),
+    name,
+    role,
+    active,
+    editableResources,
+    createdAt: todayString(),
+    updatedAt: todayString(),
+  };
+  auth.users.push(user);
+  saveState();
+  return { ok: true, user };
+}
+
+export function deleteUserLocal(id) {
+  if (id === auth.activeUserId) return { ok: false, message: "不能删除当前登录账号。" };
+  const index = auth.users.findIndex((item) => item.id === id);
+  if (index < 0) return { ok: false, message: "用户不存在。" };
+  auth.users.splice(index, 1);
+  saveState();
+  return { ok: true };
 }
