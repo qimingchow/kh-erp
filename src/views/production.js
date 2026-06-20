@@ -1,8 +1,31 @@
-import { badge, renderForm, renderTable } from "../ui/components.js";
+import { badge, renderField, renderTable } from "../ui/components.js";
 import { escapeHtml, formatDate, formatNumber } from "../lib/format.js";
 import { getMachineName } from "../domain/actions.js";
+import { canEdit } from "../lib/state.js";
 
-export function renderProduction(state) {
+function defaultProductionValues(record = {}) {
+  const current = record || {};
+  return {
+    id: current.id || "",
+    planNo: current.planNo || "",
+    orderNo: current.orderNo || "",
+    item: current.item || "",
+    qty: current.qty ?? 1,
+    dueDate: current.dueDate || new Date().toISOString().slice(0, 10),
+    machineId: current.machineId || "",
+    priority: current.priority || "标准",
+    status: current.status || "待排产",
+    progress: current.progress ?? 0,
+    note: current.note || "",
+  };
+}
+
+export function renderProduction(state, auth = {}) {
+  const editable = canEdit(auth?.currentUser, "production");
+  const formRecord = state.production.find((item) => item.id === state.ui?.productionEditingId) || null;
+  const selectedRecord =
+    state.production.find((item) => item.id === state.ui?.productionViewingId) || formRecord || state.production[0] || null;
+  const values = defaultProductionValues(formRecord);
   const pendingPlans = state.production.filter((item) => item.status !== "已完成").length;
   const machineOptions = state.machines.map((item) => ({
     value: item.id,
@@ -58,6 +81,16 @@ export function renderProduction(state) {
     { label: "优先级", render: (row) => badge(row.priority) },
     { label: "状态", render: (row) => badge(row.status) },
     { label: "进度", render: (row) => `${formatNumber(row.progress)}%` },
+    {
+      label: "操作",
+      render: (row) => `
+        <div class="row-actions">
+          <button class="btn mini" type="button" data-action="production-view" data-id="${escapeHtml(row.id)}">查看</button>
+          ${editable ? `<button class="btn mini" type="button" data-action="production-edit" data-id="${escapeHtml(row.id)}">编辑</button>` : ""}
+          ${auth?.currentUser?.role === "admin" ? `<button class="btn mini danger" type="button" data-action="production-delete" data-id="${escapeHtml(row.id)}">删除</button>` : ""}
+        </div>
+      `,
+    },
   ];
 
   return `
@@ -74,7 +107,18 @@ export function renderProduction(state) {
             <span>共 ${state.production.length} 条计划</span>
           </div>
         </div>
-        ${renderForm("production", fields, "保存计划")}
+        ${editable ? `
+          <form class="stack" data-form="production">
+            <input type="hidden" name="id" value="${escapeHtml(values.id)}" />
+            <div class="field-grid">
+              ${fields.map((field) => renderField(field, values[field.name])).join("")}
+            </div>
+            <div class="form-actions">
+              <button class="btn primary" type="submit">${formRecord ? "保存修改" : "保存计划"}</button>
+              ${formRecord ? `<button class="btn ghost" type="button" data-action="production-cancel">取消编辑</button>` : ""}
+            </div>
+          </form>
+        ` : `<div class="empty">当前账号没有生产计划维护权限，可查看排产数据。</div>`}
         ${renderTable(columns, state.production)}
       </section>
 
@@ -86,6 +130,16 @@ export function renderProduction(state) {
           </div>
         </div>
         <div class="mini-list">
+          ${selectedRecord ? `
+            <div class="mini-item">
+              <strong>${escapeHtml(selectedRecord.planNo)} · ${escapeHtml(selectedRecord.status)}</strong>
+              <div class="small">${escapeHtml(selectedRecord.item)} · ${formatNumber(selectedRecord.qty)} 件 · ${escapeHtml(getMachineName(state, selectedRecord.machineId))}</div>
+            </div>
+            <div class="mini-item">
+              <strong>交期 / 进度</strong>
+              <div class="small">${escapeHtml(formatDate(selectedRecord.dueDate))} · ${formatNumber(selectedRecord.progress)}% · ${escapeHtml(selectedRecord.priority)}</div>
+            </div>
+          ` : `<div class="empty">暂无生产计划</div>`}
           <div class="mini-item">
             <strong>进行中计划</strong>
             <div class="small">${state.production.filter((item) => item.status === "进行中").length} 条</div>

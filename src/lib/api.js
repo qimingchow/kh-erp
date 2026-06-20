@@ -75,6 +75,34 @@ export async function deleteInventoryRemote(id, token) {
   return request(`/api/inventory/${encodeURIComponent(id)}`, { method: "DELETE", token });
 }
 
+export async function saveOutboundRemote(record, token) {
+  return request("/api/outbound", { method: "POST", token, body: { record } });
+}
+
+export async function deleteOutboundRemote(id, token) {
+  return request(`/api/outbound/${encodeURIComponent(id)}`, { method: "DELETE", token });
+}
+
+export async function saveProductionRemote(record, token) {
+  return request("/api/production", { method: "POST", token, body: { record } });
+}
+
+export async function deleteProductionRemote(id, token) {
+  return request(`/api/production/${encodeURIComponent(id)}`, { method: "DELETE", token });
+}
+
+export async function updateMachineRemote(id, patch, token) {
+  return request(`/api/machines/${encodeURIComponent(id)}`, { method: "PATCH", token, body: { patch } });
+}
+
+export async function saveFinanceRemote(record, token) {
+  return request("/api/finance", { method: "POST", token, body: { record } });
+}
+
+export async function deleteFinanceRemote(id, token) {
+  return request(`/api/finance/${encodeURIComponent(id)}`, { method: "DELETE", token });
+}
+
 export async function saveUserRemote(user, token) {
   if (user.id) {
     return request(`/api/users/${encodeURIComponent(user.id)}`, { method: "PUT", token, body: user });

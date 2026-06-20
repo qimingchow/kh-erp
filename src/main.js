@@ -25,17 +25,24 @@ import {
   createInventory,
   createOutbound,
   createProduction,
+  deleteProduction,
   deleteInbound,
   deleteInventory,
   deleteOutbound,
+  deleteFinance,
   updateMachine,
+  financeRecordFromForm,
   inboundRecordFromForm,
   inventoryRecordFromForm,
+  productionRecordFromForm,
 } from "./domain/actions.js";
 import {
   bootstrap,
   deleteInboundRemote,
   deleteInventoryRemote,
+  deleteOutboundRemote,
+  deleteProductionRemote,
+  deleteFinanceRemote,
   deleteUserRemote,
   isServerMode,
   loginRemote,
@@ -43,7 +50,11 @@ import {
   resetRemote,
   saveInboundRemote,
   saveInventoryRemote,
+  saveOutboundRemote,
+  saveProductionRemote,
+  saveFinanceRemote,
   saveUserRemote,
+  updateMachineRemote,
 } from "./lib/api.js";
 import { renderOverview } from "./views/overview.js";
 import { renderInbound } from "./views/inbound.js";
@@ -184,13 +195,13 @@ function renderMain(state) {
         elements.main.innerHTML = renderOutbound(state, { currentUser });
         break;
       case "production":
-        elements.main.innerHTML = renderProduction(state);
+        elements.main.innerHTML = renderProduction(state, { currentUser });
         break;
       case "machine":
-        elements.main.innerHTML = renderMachine(state);
+        elements.main.innerHTML = renderMachine(state, { currentUser });
         break;
       case "finance":
-        elements.main.innerHTML = renderFinance(state);
+        elements.main.innerHTML = renderFinance(state, { currentUser });
         break;
       case "users":
         elements.main.innerHTML = renderUsers(state, { currentUser, users: getAuth().users });
@@ -502,6 +513,18 @@ function ensureCanEdit(resource) {
   return false;
 }
 
+function confirmDangerAction(button) {
+  if (button.getAttribute("data-confirmed") === "true") return true;
+  button.setAttribute("data-confirmed", "true");
+  button.textContent = "确认删除";
+  window.setTimeout(() => {
+    if (!button.isConnected) return;
+    button.removeAttribute("data-confirmed");
+    button.textContent = "删除";
+  }, 3000);
+  return false;
+}
+
 function userPayloadFromForm(formData) {
   return {
     id: String(formData.get("id") || "").trim(),
@@ -765,62 +788,187 @@ document.addEventListener("click", (event) => {
       alert("只有管理员可以删除出库记录。");
       return;
     }
-    if (button.getAttribute("data-confirmed") !== "true") {
-      button.setAttribute("data-confirmed", "true");
-      button.textContent = "确认删除";
-      window.setTimeout(() => {
-        if (!button.isConnected) return;
-        button.removeAttribute("data-confirmed");
-        button.textContent = "删除";
-      }, 3000);
-      return;
+    if (!confirmDangerAction(button)) return;
+    const id = button.getAttribute("data-id");
+    if (isServerMode()) {
+      deleteOutboundRemote(id, getAuthToken())
+        .then((payload) => {
+          assignRecordState(payload);
+          render();
+        })
+        .catch((error) => alert(error.message || "删除失败"));
+    } else {
+      const result = mutateState((draft) => deleteOutbound(draft, id));
+      if (result.ok === false) alert(result.message || "删除失败");
+      render();
     }
-    const result = mutateState((draft) => deleteOutbound(draft, button.getAttribute("data-id")));
-    if (result.ok === false) alert(result.message || "删除失败");
-    render();
     return;
   }
 
-  if (action === "machine-status") {
-    if (!ensureCanEdit("machine")) return;
-    mutateState((draft) =>
-      updateMachine(draft, button.getAttribute("data-machine"), {
-        status: button.getAttribute("data-status"),
-        updatedAt: timestampNow(),
-        job:
-          button.getAttribute("data-status") === "待机"
-            ? "等待排产"
-            : button.getAttribute("data-status") === "维护"
-              ? "点检中"
-              : draft.machines.find((item) => item.id === button.getAttribute("data-machine"))?.job || "生产中",
-      }),
-    );
-    render();
-    return;
-  }
-
-  if (action === "machine-step") {
-    if (!ensureCanEdit("machine")) return;
-    mutateState((draft) => {
-      const machineId = button.getAttribute("data-machine");
-      const machine = draft.machines.find((item) => item.id === machineId);
-      if (!machine) return { ok: true };
-      const step = Number(button.getAttribute("data-step").replace("%", ""));
-      const progress = Math.max(0, Math.min(100, machine.progress + step));
-      return updateMachine(draft, machineId, {
-        progress,
-        status: progress >= 100 ? "待机" : machine.status === "维护" ? "待机" : "运行",
-        updatedAt: timestampNow(),
-      });
+  if (action === "production-view") {
+    setUi({
+      productionViewingId: button.getAttribute("data-id"),
+      productionEditingId: null,
     });
     render();
     return;
   }
 
+  if (action === "production-edit") {
+    if (!ensureCanEdit("production")) return;
+    const id = button.getAttribute("data-id");
+    setUi({
+      productionViewingId: id,
+      productionEditingId: id,
+    });
+    render();
+    document.querySelector('form[data-form="production"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  if (action === "production-cancel") {
+    clearUi(["productionEditingId"]);
+    render();
+    return;
+  }
+
+  if (action === "production-delete") {
+    const currentUser = getCurrentUser();
+    if (currentUser?.role !== "admin") {
+      alert("只有管理员可以删除生产计划。");
+      return;
+    }
+    if (!confirmDangerAction(button)) return;
+    const id = button.getAttribute("data-id");
+    if (isServerMode()) {
+      deleteProductionRemote(id, getAuthToken())
+        .then((payload) => {
+          assignRecordState(payload);
+          render();
+        })
+        .catch((error) => alert(error.message || "删除失败"));
+    } else {
+      const result = mutateState((draft) => deleteProduction(draft, id));
+      if (result.ok === false) alert(result.message || "删除失败");
+      render();
+    }
+    return;
+  }
+
+  if (action === "machine-status") {
+    if (!ensureCanEdit("machine")) return;
+    const machineId = button.getAttribute("data-machine");
+    const nextStatus = button.getAttribute("data-status");
+    const currentMachine = getState().machines.find((item) => item.id === machineId);
+    const patch = {
+      status: nextStatus,
+      updatedAt: timestampNow(),
+      job:
+        nextStatus === "待机"
+          ? "等待排产"
+          : nextStatus === "维护"
+            ? "点检中"
+            : currentMachine?.job || "生产中",
+    };
+    if (isServerMode()) {
+      updateMachineRemote(machineId, patch, getAuthToken())
+        .then((payload) => {
+          assignRecordState(payload);
+          render();
+        })
+        .catch((error) => alert(error.message || "机台更新失败"));
+    } else {
+      mutateState((draft) => updateMachine(draft, machineId, patch));
+      render();
+    }
+    return;
+  }
+
+  if (action === "machine-step") {
+    if (!ensureCanEdit("machine")) return;
+    const machineId = button.getAttribute("data-machine");
+    const machine = getState().machines.find((item) => item.id === machineId);
+    if (!machine) return;
+    const step = Number(button.getAttribute("data-step").replace("%", ""));
+    const progress = Math.max(0, Math.min(100, Number(machine.progress || 0) + step));
+    const patch = {
+      progress,
+      status: progress >= 100 ? "待机" : machine.status === "维护" ? "待机" : "运行",
+      updatedAt: timestampNow(),
+    };
+    if (isServerMode()) {
+      updateMachineRemote(machineId, patch, getAuthToken())
+        .then((payload) => {
+          assignRecordState(payload);
+          render();
+        })
+        .catch((error) => alert(error.message || "机台更新失败"));
+    } else {
+      mutateState((draft) => updateMachine(draft, machineId, patch));
+      render();
+    }
+    return;
+  }
+
   if (action === "machine-complete") {
     if (!ensureCanEdit("machine")) return;
-    mutateState((draft) => updateMachine(draft, button.getAttribute("data-machine"), { progress: 100, status: "待机", updatedAt: timestampNow() }));
+    const machineId = button.getAttribute("data-machine");
+    const patch = { progress: 100, status: "待机", updatedAt: timestampNow() };
+    if (isServerMode()) {
+      updateMachineRemote(machineId, patch, getAuthToken())
+        .then((payload) => {
+          assignRecordState(payload);
+          render();
+        })
+        .catch((error) => alert(error.message || "机台更新失败"));
+    } else {
+      mutateState((draft) => updateMachine(draft, machineId, patch));
+      render();
+    }
+    return;
+  }
+
+  if (action === "finance-view") {
+    setUi({ financeViewingId: button.getAttribute("data-id"), financeEditingId: null });
     render();
+    return;
+  }
+
+  if (action === "finance-edit") {
+    if (!ensureCanEdit("finance")) return;
+    setUi({ financeViewingId: button.getAttribute("data-id"), financeEditingId: button.getAttribute("data-id") });
+    render();
+    document.querySelector('form[data-form="finance"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  if (action === "finance-cancel") {
+    clearUi(["financeEditingId"]);
+    render();
+    return;
+  }
+
+  if (action === "finance-delete") {
+    const currentUser = getCurrentUser();
+    if (currentUser?.role !== "admin") {
+      alert("只有管理员可以删除财务记录。");
+      return;
+    }
+    if (!confirmDangerAction(button)) return;
+    const id = button.getAttribute("data-id");
+    if (isServerMode()) {
+      deleteFinanceRemote(id, getAuthToken())
+        .then((payload) => {
+          assignRecordState(payload);
+          render();
+        })
+        .catch((error) => alert(error.message || "删除失败"));
+    } else {
+      const result = mutateState((draft) => deleteFinance(draft, id));
+      if (result.ok === false) alert(result.message || "删除失败");
+      render();
+    }
+    return;
   }
 
   if (action === "user-view") {
@@ -922,13 +1070,51 @@ document.addEventListener("submit", (event) => {
     return;
   }
 
-  if (isServerMode() && (formKey === "inbound" || formKey === "inventory")) {
-    const record = formKey === "inbound" ? inboundRecordFromForm(formData) : inventoryRecordFromForm(getState(), formData);
-    const runner = formKey === "inbound" ? saveInboundRemote(record, getAuthToken()) : saveInventoryRemote(record, getAuthToken());
+  if (isServerMode() && ["inbound", "inventory", "outbound", "production", "finance"].includes(formKey)) {
+    const state = getState();
+    const recordMakers = {
+      inbound: () => inboundRecordFromForm(formData),
+      inventory: () => inventoryRecordFromForm(state, formData),
+      outbound: () => {
+        const inventoryId = String(formData.get("inventoryId") || "");
+        const stock = state.inventory.find((item) => item.id === inventoryId);
+        return {
+          id: String(formData.get("id") || "").trim(),
+          inventoryId,
+          date: formData.get("date"),
+          customer: formData.get("customer"),
+          orderNo: formData.get("orderNo"),
+          qty: Number(formData.get("qty") || 0),
+          unitPrice: Number(formData.get("unitPrice") || 0),
+          logistics: formData.get("logistics"),
+          settlement: formData.get("settlement"),
+          note: formData.get("note") || "",
+          item: stock?.item || "",
+          spec: stock?.spec || "",
+          unit: stock?.unit || "",
+          warehouse: stock?.location || "",
+        };
+      },
+      production: () => productionRecordFromForm(formData),
+      finance: () => financeRecordFromForm(formData),
+    };
+    const remoteSavers = {
+      inbound: saveInboundRemote,
+      inventory: saveInventoryRemote,
+      outbound: saveOutboundRemote,
+      production: saveProductionRemote,
+      finance: saveFinanceRemote,
+    };
+    const record = recordMakers[formKey]();
+    const runner = remoteSavers[formKey](record, getAuthToken());
     runner
       .then((payload) => {
         applyServerBootstrap(payload);
         if (formKey === "inbound") clearUi(["inboundEditingId", "inboundFormOpen"]);
+        if (formKey === "inventory") clearUi(["inventoryEditingId"]);
+        if (formKey === "outbound") clearUi(["outboundEditingId"]);
+        if (formKey === "production") clearUi(["productionEditingId"]);
+        if (formKey === "finance") clearUi(["financeEditingId"]);
         render();
       })
       .catch((error) => alert(error.message || "保存失败"));

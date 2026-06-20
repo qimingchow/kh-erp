@@ -102,6 +102,7 @@ function requireAdmin(req, res, db) {
 function normalizeInventory(record) {
   const qty = Number(record.qty || 0);
   const safe = Number(record.safe || 0);
+  const status = record.status === "冻结" ? "冻结" : qty <= safe ? "低库存" : "正常";
   return {
     ...record,
     id: record.id || makeId("stock"),
@@ -109,9 +110,14 @@ function normalizeInventory(record) {
     reserved: Number(record.reserved || 0),
     safe,
     cost: Number(record.cost || 0),
-    status: record.status === "冻结" ? "冻结" : qty <= safe ? "低库存" : "正常",
+    status,
     lastUpdate: record.lastUpdate || new Date().toISOString().slice(0, 10),
   };
+}
+
+function normalizeInventoryStatus(record) {
+  if ((record.status || "") === "冻结") return "冻结";
+  return Number(record.qty || 0) <= Number(record.safe || 0) ? "低库存" : "正常";
 }
 
 function upsertInventoryRecord(list, record) {
@@ -126,6 +132,293 @@ function upsertInventoryRecord(list, record) {
     list.unshift(next);
   }
   return next;
+}
+
+function todayText() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function timestampText() {
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+}
+
+function findInventoryForOutbound(state, record) {
+  if (!record) return null;
+  if (record.inventoryId) {
+    const exact = state.inventory.find((item) => item.id === record.inventoryId);
+    if (exact) return exact;
+  }
+
+  return (
+    state.inventory.find(
+      (item) => item.item === record.item && item.spec === record.spec && item.location === record.warehouse,
+    ) ||
+    state.inventory.find((item) => item.item === record.item && item.spec === record.spec) ||
+    null
+  );
+}
+
+function findFinanceForOutbound(state, record) {
+  if (!record) return null;
+  if (record.financeId) {
+    const exact = state.finance.find((item) => item.id === record.financeId);
+    if (exact) return exact;
+  }
+
+  return (
+    state.finance.find((item) => item.outboundId === record.id) ||
+    state.finance.find((item) => item.source === `出库单 ${record.orderNo || ""}`) ||
+    null
+  );
+}
+
+function buildOutboundFinance(record, financeId) {
+  return {
+    id: financeId || makeId("fin"),
+    outboundId: record.id,
+    date: record.date,
+    type: "应收",
+    source: `出库单 ${record.orderNo}`,
+    counterparty: record.customer,
+    amount: record.amount,
+    status: record.settlement,
+    method: record.settlement === "已收" ? "转账" : "月结",
+    note: "由出库自动生成",
+    updatedAt: timestampText(),
+  };
+}
+
+function saveOutboundRecord(state, payload) {
+  const id = String(payload.id || "").trim();
+  const inventoryId = String(payload.inventoryId || "").trim();
+  const stock = state.inventory.find((item) => item.id === inventoryId);
+  if (!stock) return { ok: false, message: "请选择一个库存物料。" };
+
+  const qty = Number(payload.qty || 0);
+  const unitPrice = Number(payload.unitPrice || 0);
+  const existing = id ? state.outbound.find((item) => item.id === id) : null;
+  const previousStock = existing ? findInventoryForOutbound(state, existing) : null;
+  if (existing && !previousStock) return { ok: false, message: "原出库关联库存不存在，无法自动回滚。" };
+
+  const availableQty = Number(stock.qty || 0) + (previousStock?.id === stock.id ? Number(existing.qty || 0) : 0);
+  if (!qty || qty > availableQty) return { ok: false, message: "出库数量不能大于可用库存。" };
+
+  const record = {
+    id: existing?.id || makeId("out"),
+    inventoryId,
+    financeId: existing?.financeId || "",
+    date: payload.date || todayText(),
+    customer: String(payload.customer || "").trim(),
+    orderNo: String(payload.orderNo || "").trim(),
+    item: stock.item,
+    spec: stock.spec,
+    qty,
+    unit: stock.unit,
+    unitPrice,
+    amount: Number((qty * unitPrice).toFixed(2)),
+    warehouse: stock.location,
+    logistics: String(payload.logistics || "").trim(),
+    settlement: payload.settlement || "待收",
+    note: String(payload.note || "").trim(),
+    updatedAt: timestampText(),
+  };
+
+  if (!record.customer) return { ok: false, message: "请填写客户。" };
+  if (!record.orderNo) return { ok: false, message: "请填写销售单号。" };
+
+  if (previousStock) {
+    previousStock.qty += Number(existing.qty || 0);
+    previousStock.lastUpdate = record.date;
+    previousStock.status = normalizeInventoryStatus(previousStock);
+  }
+
+  stock.qty -= qty;
+  stock.lastUpdate = record.date;
+  stock.status = normalizeInventoryStatus(stock);
+
+  const linkedFinance = existing ? findFinanceForOutbound(state, existing) : null;
+  const financeRecord = buildOutboundFinance(record, linkedFinance?.id || record.financeId);
+  record.financeId = financeRecord.id;
+
+  if (existing) {
+    Object.assign(existing, record);
+  } else {
+    state.outbound.unshift(record);
+  }
+
+  if (linkedFinance) {
+    Object.assign(linkedFinance, financeRecord);
+  } else {
+    state.finance.unshift(financeRecord);
+  }
+
+  state.ui = { ...(state.ui || {}), outboundViewingId: record.id, outboundEditingId: null };
+  return { ok: true, record };
+}
+
+function deleteOutboundRecord(state, id) {
+  const index = state.outbound.findIndex((item) => item.id === id);
+  if (index < 0) return { ok: false, message: "出库记录不存在。" };
+
+  const record = state.outbound[index];
+  const stock = findInventoryForOutbound(state, record);
+  if (!stock) return { ok: false, message: "原出库关联库存不存在，无法自动回滚。" };
+
+  stock.qty += Number(record.qty || 0);
+  stock.lastUpdate = todayText();
+  stock.status = normalizeInventoryStatus(stock);
+
+  const finance = findFinanceForOutbound(state, record);
+  if (finance) {
+    state.finance = state.finance.filter((item) => item.id !== finance.id);
+  }
+
+  state.outbound.splice(index, 1);
+  if (state.ui?.outboundViewingId === id) state.ui.outboundViewingId = null;
+  if (state.ui?.outboundEditingId === id) state.ui.outboundEditingId = null;
+  return { ok: true };
+}
+
+function assignMachineToPlan(state, plan) {
+  if (!plan.machineId) return;
+  const machine = state.machines.find((item) => item.id === plan.machineId);
+  if (!machine) return;
+
+  machine.job = `${plan.item} / ${plan.planNo}`;
+  machine.status = plan.status === "已完成" ? "待机" : "运行";
+  machine.progress = Number(plan.progress || 0);
+  machine.updatedAt = timestampText();
+}
+
+function saveProductionRecord(state, payload) {
+  const id = String(payload.id || "").trim();
+  const existing = id ? state.production.find((item) => item.id === id) : null;
+  const record = {
+    id: existing?.id || makeId("plan"),
+    planNo: String(payload.planNo || "").trim(),
+    orderNo: String(payload.orderNo || "").trim(),
+    item: String(payload.item || "").trim(),
+    qty: Number(payload.qty || 0),
+    dueDate: payload.dueDate || todayText(),
+    machineId: String(payload.machineId || "").trim(),
+    priority: payload.priority || "标准",
+    status: payload.status || "待排产",
+    progress: Math.max(0, Math.min(100, Number(payload.progress || 0))),
+    note: String(payload.note || "").trim(),
+    updatedAt: timestampText(),
+  };
+
+  if (!record.planNo) return { ok: false, message: "请填写计划编号。" };
+  if (!record.item) return { ok: false, message: "请填写生产物料。" };
+  if (!record.qty) return { ok: false, message: "请填写计划数量。" };
+
+  if (existing) {
+    Object.assign(existing, record);
+  } else {
+    state.production.unshift(record);
+  }
+  assignMachineToPlan(state, record);
+  state.ui = { ...(state.ui || {}), productionViewingId: record.id, productionEditingId: null };
+  return { ok: true, record };
+}
+
+function deleteProductionRecord(state, id) {
+  const index = state.production.findIndex((item) => item.id === id);
+  if (index < 0) return { ok: false, message: "生产计划不存在。" };
+
+  const plan = state.production[index];
+  const machine = state.machines.find((item) => item.id === plan.machineId);
+  if (machine && String(machine.job || "").includes(plan.planNo)) {
+    Object.assign(machine, {
+      job: "等待排产",
+      status: "待机",
+      progress: 0,
+      updatedAt: timestampText(),
+    });
+  }
+
+  state.production.splice(index, 1);
+  if (state.ui?.productionViewingId === id) state.ui.productionViewingId = null;
+  if (state.ui?.productionEditingId === id) state.ui.productionEditingId = null;
+  return { ok: true };
+}
+
+function updateMachineRecord(state, machineId, patch) {
+  const machine = state.machines.find((item) => item.id === machineId);
+  if (!machine) return { ok: false, message: "机台不存在。" };
+
+  Object.assign(machine, {
+    ...patch,
+    progress: patch.progress === undefined ? machine.progress : Math.max(0, Math.min(100, Number(patch.progress || 0))),
+    updatedAt: timestampText(),
+  });
+
+  const plan = state.production.find((item) => item.machineId === machine.id && item.status !== "已完成");
+  if (plan) {
+    plan.progress = machine.progress;
+    plan.status = machine.progress >= 100 ? "已完成" : machine.status === "运行" ? "进行中" : plan.status;
+    plan.updatedAt = timestampText();
+  }
+
+  return { ok: true, record: machine };
+}
+
+function saveFinanceRecord(state, payload) {
+  const id = String(payload.id || "").trim();
+  const existing = id ? state.finance.find((item) => item.id === id) : null;
+  const record = {
+    id: existing?.id || makeId("fin"),
+    outboundId: existing?.outboundId || payload.outboundId || "",
+    date: payload.date || todayText(),
+    type: payload.type || "应收",
+    source: String(payload.source || "").trim(),
+    counterparty: String(payload.counterparty || "").trim(),
+    amount: Number(payload.amount || 0),
+    status: payload.status || "待收",
+    method: payload.method || "月结",
+    note: String(payload.note || "").trim(),
+    updatedAt: timestampText(),
+  };
+
+  if (!record.source) return { ok: false, message: "请填写来源单据。" };
+  if (!record.counterparty) return { ok: false, message: "请填写往来单位。" };
+
+  if (existing) {
+    Object.assign(existing, record);
+  } else {
+    state.finance.unshift(record);
+  }
+
+  if (record.outboundId) {
+    const outbound = state.outbound.find((item) => item.id === record.outboundId);
+    if (outbound) outbound.settlement = record.status;
+  }
+
+  state.ui = { ...(state.ui || {}), financeViewingId: record.id, financeEditingId: null };
+  return { ok: true, record };
+}
+
+function deleteFinanceRecord(state, id) {
+  const index = state.finance.findIndex((item) => item.id === id);
+  if (index < 0) return { ok: false, message: "财务记录不存在。" };
+  const finance = state.finance[index];
+  if (finance.outboundId) {
+    const outbound = state.outbound.find((item) => item.id === finance.outboundId);
+    if (outbound) {
+      outbound.financeId = "";
+      outbound.settlement = "待收";
+    }
+  }
+  state.finance.splice(index, 1);
+  if (state.ui?.financeViewingId === id) state.ui.financeViewingId = null;
+  if (state.ui?.financeEditingId === id) state.ui.financeEditingId = null;
+  return { ok: true };
 }
 
 async function handleApi(req, res, pathname) {
@@ -287,6 +580,117 @@ async function handleApi(req, res, pathname) {
     db.state.inventory = db.state.inventory.filter((item) => item.id !== id);
     if (db.state.ui?.inventoryViewingId === id) db.state.ui.inventoryViewingId = null;
     if (db.state.ui?.inventoryEditingId === id) db.state.ui.inventoryEditingId = null;
+    writeDb(db);
+    sendJson(res, 200, buildBootstrap(db, context.user, context.token));
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/outbound") {
+    const context = requireUser(req, res, db);
+    if (!context) return;
+    if (!canEdit(context.user, "outbound")) {
+      sendError(res, 403, "当前账号没有出库维护权限。");
+      return;
+    }
+    const result = saveOutboundRecord(db.state, (await readBody(req)).record || {});
+    if (result.ok === false) {
+      sendError(res, 400, result.message);
+      return;
+    }
+    writeDb(db);
+    sendJson(res, 200, buildBootstrap(db, context.user, context.token));
+    return;
+  }
+
+  const outboundMatch = pathname.match(/^\/api\/outbound\/([^/]+)$/);
+  if (outboundMatch && method === "DELETE") {
+    const context = requireAdmin(req, res, db);
+    if (!context) return;
+    const result = deleteOutboundRecord(db.state, decodeURIComponent(outboundMatch[1]));
+    if (result.ok === false) {
+      sendError(res, 400, result.message);
+      return;
+    }
+    writeDb(db);
+    sendJson(res, 200, buildBootstrap(db, context.user, context.token));
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/production") {
+    const context = requireUser(req, res, db);
+    if (!context) return;
+    if (!canEdit(context.user, "production")) {
+      sendError(res, 403, "当前账号没有生产计划维护权限。");
+      return;
+    }
+    const result = saveProductionRecord(db.state, (await readBody(req)).record || {});
+    if (result.ok === false) {
+      sendError(res, 400, result.message);
+      return;
+    }
+    writeDb(db);
+    sendJson(res, 200, buildBootstrap(db, context.user, context.token));
+    return;
+  }
+
+  const productionMatch = pathname.match(/^\/api\/production\/([^/]+)$/);
+  if (productionMatch && method === "DELETE") {
+    const context = requireAdmin(req, res, db);
+    if (!context) return;
+    const result = deleteProductionRecord(db.state, decodeURIComponent(productionMatch[1]));
+    if (result.ok === false) {
+      sendError(res, 400, result.message);
+      return;
+    }
+    writeDb(db);
+    sendJson(res, 200, buildBootstrap(db, context.user, context.token));
+    return;
+  }
+
+  const machineMatch = pathname.match(/^\/api\/machines\/([^/]+)$/);
+  if (machineMatch && method === "PATCH") {
+    const context = requireUser(req, res, db);
+    if (!context) return;
+    if (!canEdit(context.user, "machine")) {
+      sendError(res, 403, "当前账号没有机台维护权限。");
+      return;
+    }
+    const result = updateMachineRecord(db.state, decodeURIComponent(machineMatch[1]), (await readBody(req)).patch || {});
+    if (result.ok === false) {
+      sendError(res, 400, result.message);
+      return;
+    }
+    writeDb(db);
+    sendJson(res, 200, buildBootstrap(db, context.user, context.token));
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/finance") {
+    const context = requireUser(req, res, db);
+    if (!context) return;
+    if (!canEdit(context.user, "finance")) {
+      sendError(res, 403, "当前账号没有财务维护权限。");
+      return;
+    }
+    const result = saveFinanceRecord(db.state, (await readBody(req)).record || {});
+    if (result.ok === false) {
+      sendError(res, 400, result.message);
+      return;
+    }
+    writeDb(db);
+    sendJson(res, 200, buildBootstrap(db, context.user, context.token));
+    return;
+  }
+
+  const financeMatch = pathname.match(/^\/api\/finance\/([^/]+)$/);
+  if (financeMatch && method === "DELETE") {
+    const context = requireAdmin(req, res, db);
+    if (!context) return;
+    const result = deleteFinanceRecord(db.state, decodeURIComponent(financeMatch[1]));
+    if (result.ok === false) {
+      sendError(res, 400, result.message);
+      return;
+    }
     writeDb(db);
     sendJson(res, 200, buildBootstrap(db, context.user, context.token));
     return;

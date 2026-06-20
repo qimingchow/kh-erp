@@ -300,8 +300,27 @@ export function assignMachineToPlan(state, plan) {
 }
 
 export function createProduction(state, formData) {
-  const record = {
-    id: makeId("plan"),
+  const id = String(formData.get("id") || "").trim();
+  const record = productionRecordFromForm(formData, id);
+  const existing = id ? state.production.find((item) => item.id === id) : null;
+
+  if (existing) {
+    Object.assign(existing, record);
+  } else {
+    state.production.unshift(record);
+  }
+  assignMachineToPlan(state, record);
+  state.ui = {
+    ...(state.ui || {}),
+    productionEditingId: null,
+    productionViewingId: record.id,
+  };
+  return { ok: true, id: record.id };
+}
+
+export function productionRecordFromForm(formData, existingId = "") {
+  return {
+    id: existingId || String(formData.get("id") || "").trim() || makeId("plan"),
     planNo: formData.get("planNo"),
     orderNo: formData.get("orderNo"),
     item: formData.get("item"),
@@ -312,16 +331,32 @@ export function createProduction(state, formData) {
     status: formData.get("status"),
     progress: Number(formData.get("progress") || 0),
     note: formData.get("note") || "",
+    updatedAt: timestampNow(),
   };
+}
 
-  state.production.unshift(record);
-  assignMachineToPlan(state, record);
+export function deleteProduction(state, id) {
+  const index = state.production.findIndex((item) => item.id === id);
+  if (index < 0) return { ok: false, message: "生产计划不存在" };
+  const plan = state.production[index];
+  const machine = state.machines.find((item) => item.id === plan.machineId);
+  if (machine && String(machine.job || "").includes(plan.planNo)) {
+    Object.assign(machine, {
+      job: "等待排产",
+      status: "待机",
+      progress: 0,
+      updatedAt: timestampNow(),
+    });
+  }
+  state.production.splice(index, 1);
+  if (state.ui?.productionEditingId === id) state.ui.productionEditingId = null;
+  if (state.ui?.productionViewingId === id) state.ui.productionViewingId = null;
   return { ok: true };
 }
 
-export function createFinance(state, formData) {
-  state.finance.unshift({
-    id: makeId("fin"),
+export function financeRecordFromForm(formData, existingId = "") {
+  return {
+    id: existingId || String(formData.get("id") || "").trim() || makeId("fin"),
     date: formData.get("date"),
     type: formData.get("type"),
     source: formData.get("source"),
@@ -330,8 +365,48 @@ export function createFinance(state, formData) {
     status: formData.get("status"),
     method: formData.get("method"),
     note: formData.get("note") || "",
-  });
+    updatedAt: timestampNow(),
+  };
+}
 
+export function createFinance(state, formData) {
+  const id = String(formData.get("id") || "").trim();
+  const record = financeRecordFromForm(formData, id);
+  const existing = id ? state.finance.find((item) => item.id === id) : null;
+
+  if (existing) {
+    Object.assign(existing, record);
+  } else {
+    state.finance.unshift(record);
+  }
+
+  if (record.outboundId) {
+    const outbound = state.outbound.find((item) => item.id === record.outboundId);
+    if (outbound) outbound.settlement = record.status;
+  }
+
+  state.ui = {
+    ...(state.ui || {}),
+    financeEditingId: null,
+    financeViewingId: record.id,
+  };
+  return { ok: true, id: record.id };
+}
+
+export function deleteFinance(state, id) {
+  const index = state.finance.findIndex((item) => item.id === id);
+  if (index < 0) return { ok: false, message: "财务记录不存在" };
+  const finance = state.finance[index];
+  if (finance.outboundId) {
+    const outbound = state.outbound.find((item) => item.id === finance.outboundId);
+    if (outbound) {
+      outbound.financeId = "";
+      outbound.settlement = "待收";
+    }
+  }
+  state.finance.splice(index, 1);
+  if (state.ui?.financeEditingId === id) state.ui.financeEditingId = null;
+  if (state.ui?.financeViewingId === id) state.ui.financeViewingId = null;
   return { ok: true };
 }
 

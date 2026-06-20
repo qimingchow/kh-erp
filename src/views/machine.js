@@ -2,6 +2,7 @@ import { badge } from "../ui/components.js";
 import { escapeHtml, formatNumber } from "../lib/format.js";
 import { MACHINE_TYPES } from "../data/seed.js";
 import { getMachineName } from "../domain/actions.js";
+import { canEdit } from "../lib/state.js";
 
 function groupMachines(state) {
   const grouped = new Map();
@@ -13,7 +14,8 @@ function groupMachines(state) {
   return grouped;
 }
 
-export function renderMachine(state) {
+export function renderMachine(state, auth = {}) {
+  const editable = canEdit(auth?.currentUser, "machine");
   const grouped = groupMachines(state);
   const orderedTypes = [...MACHINE_TYPES, ...[...grouped.keys()].filter((type) => !MACHINE_TYPES.includes(type))];
   const uniqueTypes = [...new Set(orderedTypes)];
@@ -51,14 +53,16 @@ export function renderMachine(state) {
                       </div>
                       <div class="small" style="margin-top: 6px;">进度 ${formatNumber(machine.progress)}% · 最近更新 ${escapeHtml(machine.updatedAt)}</div>
                     </div>
-                    <div class="machine-actions">
-                      <button type="button" data-action="machine-status" data-machine="${escapeHtml(machine.id)}" data-status="运行">运行</button>
-                      <button type="button" data-action="machine-status" data-machine="${escapeHtml(machine.id)}" data-status="待机">待机</button>
-                      <button type="button" data-action="machine-status" data-machine="${escapeHtml(machine.id)}" data-status="维护">维护</button>
-                      <button type="button" data-action="machine-step" data-machine="${escapeHtml(machine.id)}" data-step="10">+10%</button>
-                      <button type="button" data-action="machine-step" data-machine="${escapeHtml(machine.id)}" data-step="-10">-10%</button>
-                      <button type="button" data-action="machine-complete" data-machine="${escapeHtml(machine.id)}">完成</button>
-                    </div>
+                    ${editable ? `
+                      <div class="machine-actions">
+                        <button type="button" data-action="machine-status" data-machine="${escapeHtml(machine.id)}" data-status="运行">运行</button>
+                        <button type="button" data-action="machine-status" data-machine="${escapeHtml(machine.id)}" data-status="待机">待机</button>
+                        <button type="button" data-action="machine-status" data-machine="${escapeHtml(machine.id)}" data-status="维护">维护</button>
+                        <button type="button" data-action="machine-step" data-machine="${escapeHtml(machine.id)}" data-step="10">+10%</button>
+                        <button type="button" data-action="machine-step" data-machine="${escapeHtml(machine.id)}" data-step="-10">-10%</button>
+                        <button type="button" data-action="machine-complete" data-machine="${escapeHtml(machine.id)}">完成</button>
+                      </div>
+                    ` : ""}
                   </div>
                 `,
               )

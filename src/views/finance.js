@@ -1,7 +1,28 @@
-import { badge, renderForm, renderTable } from "../ui/components.js";
+import { badge, renderField, renderTable } from "../ui/components.js";
 import { escapeHtml, formatCurrency, formatDate } from "../lib/format.js";
+import { canEdit } from "../lib/state.js";
 
-export function renderFinance(state) {
+function defaultFinanceValues(record = {}) {
+  const current = record || {};
+  return {
+    id: current.id || "",
+    date: current.date || new Date().toISOString().slice(0, 10),
+    type: current.type || "应收",
+    source: current.source || "",
+    counterparty: current.counterparty || "",
+    amount: current.amount ?? 0,
+    status: current.status || "待收",
+    method: current.method || "月结",
+    note: current.note || "",
+  };
+}
+
+export function renderFinance(state, auth = {}) {
+  const editable = canEdit(auth?.currentUser, "finance");
+  const formRecord = state.finance.find((item) => item.id === state.ui?.financeEditingId) || null;
+  const selectedRecord =
+    state.finance.find((item) => item.id === state.ui?.financeViewingId) || formRecord || state.finance[0] || null;
+  const values = defaultFinanceValues(formRecord);
   const pendingReceivable = state.finance
     .filter((item) => item.type === "应收" && item.status !== "已收")
     .reduce((total, item) => total + item.amount, 0);
@@ -57,6 +78,16 @@ export function renderFinance(state) {
     { label: "金额", render: (row) => formatCurrency(row.amount) },
     { label: "状态", render: (row) => badge(row.status) },
     { label: "方式", render: (row) => escapeHtml(row.method) },
+    {
+      label: "操作",
+      render: (row) => `
+        <div class="row-actions">
+          <button class="btn mini" type="button" data-action="finance-view" data-id="${escapeHtml(row.id)}">查看</button>
+          ${editable ? `<button class="btn mini" type="button" data-action="finance-edit" data-id="${escapeHtml(row.id)}">编辑</button>` : ""}
+          ${auth?.currentUser?.role === "admin" ? `<button class="btn mini danger" type="button" data-action="finance-delete" data-id="${escapeHtml(row.id)}">删除</button>` : ""}
+        </div>
+      `,
+    },
   ];
 
   return `
@@ -73,7 +104,18 @@ export function renderFinance(state) {
             <span>共 ${state.finance.length} 条记录</span>
           </div>
         </div>
-        ${renderForm("finance", fields, "保存财务")}
+        ${editable ? `
+          <form class="stack" data-form="finance">
+            <input type="hidden" name="id" value="${escapeHtml(values.id)}" />
+            <div class="field-grid">
+              ${fields.map((field) => renderField(field, values[field.name])).join("")}
+            </div>
+            <div class="form-actions">
+              <button class="btn primary" type="submit">${formRecord ? "保存修改" : "保存财务"}</button>
+              ${formRecord ? `<button class="btn ghost" type="button" data-action="finance-cancel">取消编辑</button>` : ""}
+            </div>
+          </form>
+        ` : `<div class="empty">当前账号没有财务维护权限，可查看财务记录。</div>`}
         ${renderTable(columns, state.finance)}
       </section>
 
@@ -85,6 +127,12 @@ export function renderFinance(state) {
           </div>
         </div>
         <div class="mini-list">
+          ${selectedRecord ? `
+            <div class="mini-item">
+              <strong>${escapeHtml(selectedRecord.source)} · ${escapeHtml(selectedRecord.status)}</strong>
+              <div class="small">${escapeHtml(selectedRecord.counterparty)} · ${formatCurrency(selectedRecord.amount)} · ${escapeHtml(formatDate(selectedRecord.date))}</div>
+            </div>
+          ` : `<div class="empty">暂无财务记录</div>`}
           <div class="mini-item">
             <strong>待收金额</strong>
             <div class="small">${formatCurrency(
