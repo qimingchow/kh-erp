@@ -9,12 +9,22 @@ REMOTE_PORT="${DEPLOY_PORT:-4173}"
 REMOTE_BIND="${DEPLOY_BIND:-0.0.0.0}"
 REMOTE_LOG="${DEPLOY_LOG:-kh-erp.log}"
 REMOTE="${REMOTE_USER}@${REMOTE_HOST}"
+SSH_CONTROL_PATH="${TMPDIR:-/tmp}/kh-erp-deploy-${REMOTE_USER}-${REMOTE_HOST}-$$.sock"
 SSH_OPTIONS=(
   -o PubkeyAuthentication=no
   -o PreferredAuthentications=password
   -o NumberOfPasswordPrompts=3
+  -o ControlMaster=auto
+  -o ControlPersist=120
+  -o ControlPath="$SSH_CONTROL_PATH"
 )
-RSYNC_SSH="ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o NumberOfPasswordPrompts=3"
+RSYNC_SSH="ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o NumberOfPasswordPrompts=3 -o ControlMaster=auto -o ControlPersist=120 -o ControlPath=$SSH_CONTROL_PATH"
+
+cleanup_ssh() {
+  ssh -o ControlPath="$SSH_CONTROL_PATH" -O exit "$REMOTE" >/dev/null 2>&1 || true
+  rm -f "$SSH_CONTROL_PATH" >/dev/null 2>&1 || true
+}
+trap cleanup_ssh EXIT
 
 for cmd in git rsync ssh; do
   command -v "$cmd" >/dev/null 2>&1 || {
@@ -27,6 +37,9 @@ if [[ -n "$(git -C "$ROOT_DIR" status --short)" ]]; then
   echo "Working tree is not clean. Commit or stash changes first." >&2
   exit 1
 fi
+
+echo "0. Opening SSH session..."
+ssh "${SSH_OPTIONS[@]}" -MNf "$REMOTE"
 
 echo "1. Backing up remote data..."
 ssh "${SSH_OPTIONS[@]}" "$REMOTE" "set -e; mkdir -p '$REMOTE_DIR/backups'; if [ -f '$REMOTE_DIR/data/kh-erp-db.json' ]; then cp '$REMOTE_DIR/data/kh-erp-db.json' '$REMOTE_DIR/backups/kh-erp-db-\$(date +%Y%m%d-%H%M%S).json'; fi"
