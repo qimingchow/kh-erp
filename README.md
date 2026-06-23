@@ -41,51 +41,123 @@ python3 -m http.server 4174
 - 录单人员：默认可查看、新增、编辑来料单；其他模块只读。
 - 用户权限页可给非管理员配置可编辑模块，后端接口会同步校验。
 
-## 线上部署流程
+## 标准线上部署流程
 
-推荐用 `deploy.sh`，以后每次更新都按这个顺序走：
+以后统一使用“登录服务器后部署”的方式。Mac 本地只负责提交和推送代码，服务器负责拉取 GitHub 最新代码并重启服务。
 
-1. 在本地完成修改并提交。
-2. 从本地把代码同步到云服务器。
-3. 在云服务器备份 `data/kh-erp-db.json`。
-4. 重启 Node 服务。
-5. 访问本机健康检查和公网地址确认正常。
+### 1. 本地提交并推送
 
-本地执行：
+在 Mac 本地项目目录执行：
 
 ```bash
-./deploy.sh
+cd /Users/stephen/Documents/codexWorkspace
+git status
+git add .
+git commit -m "本次修改说明"
+git push origin main
 ```
 
-如果服务器地址或目录有变化，可以临时覆盖环境变量：
+如果 `git status` 显示没有修改，就不需要 `git add` 和 `git commit`，只确认 `git push origin main` 已经成功即可。
 
-```bash
-DEPLOY_HOST=118.145.87.70 DEPLOY_USER=root DEPLOY_DIR=/opt/kh-erp ./deploy.sh
-```
+### 2. 登录服务器
 
-脚本默认会：
-
-- 先备份线上数据库文件到 `/opt/kh-erp/backups/`
-- 再用 `rsync` 同步代码
-- 然后重启服务
-- 最后检查 `http://127.0.0.1:4173/api/health`
-
-## 服务器手工步骤
-
-如果你想手工操作，也可以按这个顺序：
+在 Mac 终端执行：
 
 ```bash
 ssh root@118.145.87.70
+```
+
+输入服务器密码后，看到类似下面的提示就表示已经在服务器上：
+
+```text
+root@kh-erp:~#
+```
+
+### 3. 进入项目目录并部署
+
+在服务器上执行：
+
+```bash
 cd /opt/kh-erp
-mkdir -p backups
-cp data/kh-erp-db.json backups/kh-erp-db-$(date +%Y%m%d-%H%M%S).json
-pkill -f "server/server.js" || true
-nohup env HOST=0.0.0.0 PORT=4173 npm run start > kh-erp.log 2>&1 &
+./deploy.sh
+```
+
+正常输出应类似：
+
+```text
+1. Checking server tools...
+2. Backing up data...
+3. Updating code from GitHub...
+4. Restarting service...
+5. Verifying health...
+{"ok":true,"name":"kh-erp","serverMode":true}
+Deploy complete.
+```
+
+### 4. 退出服务器
+
+部署完成后执行：
+
+```bash
+exit
+```
+
+### 5. 部署脚本做了什么
+
+`/opt/kh-erp/deploy.sh` 会自动完成：
+
+- 检查服务器是否有 `git`、`npm`、`curl`
+- 备份线上数据库 `data/kh-erp-db.json` 到 `backups/`
+- 从 GitHub 拉取 `main` 分支最新代码
+- 停止旧的 Node 服务
+- 用 `HOST=0.0.0.0 PORT=4173 npm run start` 重新启动
+- 检查 `http://127.0.0.1:4173/api/health`
+
+### 6. 常用排错命令
+
+在服务器上查看服务日志：
+
+```bash
+cd /opt/kh-erp
+tail -n 100 kh-erp.log
+```
+
+检查后端健康状态：
+
+```bash
 curl http://127.0.0.1:4173/api/health
+```
+
+检查首页是否返回 HTML：
+
+```bash
+curl -I http://127.0.0.1:4173/
+```
+
+查看 Node 服务进程：
+
+```bash
+ps -ef | grep "server/server.js" | grep -v grep
+```
+
+### 7. 回滚数据
+
+如果只是数据出问题，可以从备份恢复。先查看备份：
+
+```bash
+cd /opt/kh-erp
+ls -lh backups/
+```
+
+恢复某一个备份：
+
+```bash
+cp backups/kh-erp-db-YYYYMMDD-HHMMSS.json data/kh-erp-db.json
+./deploy.sh
 ```
 
 ## GitHub 说明
 
-本项目的代码仓库建议继续同步到 GitHub 作为版本备份，但线上服务器更新不依赖服务器自己去 `git pull`。如果服务器访问 GitHub 不稳定，直接从本地同步会更稳。
+本项目的代码仓库继续同步到 GitHub 作为版本备份。线上服务器标准更新方式是服务器执行 `./deploy.sh`，由服务器从 GitHub 拉取最新代码。
 
 后续正式生产建议把文件型数据迁移到 MySQL/PostgreSQL，并加上操作日志、审批流和备份策略。

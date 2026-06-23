@@ -1,70 +1,47 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REMOTE_USER="${DEPLOY_USER:-root}"
-REMOTE_HOST="${DEPLOY_HOST:-118.145.87.70}"
-REMOTE_DIR="${DEPLOY_DIR:-/opt/kh-erp}"
-REMOTE_PORT="${DEPLOY_PORT:-4173}"
-REMOTE_BIND="${DEPLOY_BIND:-0.0.0.0}"
-REMOTE_LOG="${DEPLOY_LOG:-kh-erp.log}"
-REMOTE="${REMOTE_USER}@${REMOTE_HOST}"
-SSH_OPTIONS=(
-  -o PubkeyAuthentication=no
-  -o PreferredAuthentications=password
-  -o NumberOfPasswordPrompts=3
-)
+APP_DIR="${APP_DIR:-/opt/kh-erp}"
+APP_PORT="${APP_PORT:-4173}"
+APP_HOST="${APP_HOST:-0.0.0.0}"
+APP_LOG="${APP_LOG:-kh-erp.log}"
+APP_BRANCH="${APP_BRANCH:-main}"
+DB_FILE="$APP_DIR/data/kh-erp-db.json"
+BACKUP_DIR="$APP_DIR/backups"
 
-for cmd in git ssh tar; do
+cd "$APP_DIR"
+
+echo "1. Checking server tools..."
+for cmd in git npm curl; do
   command -v "$cmd" >/dev/null 2>&1 || {
-    echo "Missing required command: $cmd" >&2
+    echo "Missing required command on server: $cmd" >&2
     exit 1
   }
 done
 
-if [[ -n "$(git -C "$ROOT_DIR" status --short)" ]]; then
-  echo "Warning: working tree has uncommitted changes; deploying current local files." >&2
+echo "2. Backing up data..."
+mkdir -p "$BACKUP_DIR"
+if [[ -f "$DB_FILE" ]]; then
+  cp "$DB_FILE" "$BACKUP_DIR/kh-erp-db-$(date +%Y%m%d-%H%M%S).json"
 fi
 
-REMOTE_DEPLOY_SCRIPT=$(cat <<'REMOTE_SCRIPT'
-set -euo pipefail
+echo "3. Updating code from GitHub..."
+git fetch origin "$APP_BRANCH"
+git checkout "$APP_BRANCH"
+git pull --ff-only origin "$APP_BRANCH"
 
-echo "1. Backing up remote data..."
-mkdir -p "$REMOTE_DIR/backups"
-if [ -f "$REMOTE_DIR/data/kh-erp-db.json" ]; then
-  cp "$REMOTE_DIR/data/kh-erp-db.json" "$REMOTE_DIR/backups/kh-erp-db-$(date +%Y%m%d-%H%M%S).json"
-fi
-
-echo "2. Uploading code to server..."
-tmp_dir="$(mktemp -d)"
-cleanup() {
-  rm -rf "$tmp_dir"
-}
-trap cleanup EXIT
-
-tar -xzf - -C "$tmp_dir"
-mkdir -p "$REMOTE_DIR"
-find "$REMOTE_DIR" -mindepth 1 -maxdepth 1 ! -name data ! -name backups -exec rm -rf {} +
-cp -a "$tmp_dir"/. "$REMOTE_DIR"/
-
-echo "3. Restarting remote service..."
-cd "$REMOTE_DIR"
+echo "4. Restarting service..."
 node_pids="$(ps -eo pid=,comm=,args= | awk '$2 ~ /^(node|nodejs)$/ && $0 ~ /server\/server\.js/ {print $1}' || true)"
 if [[ -n "$node_pids" ]]; then
   kill $node_pids || true
   sleep 1
 fi
 
-if ! command -v npm >/dev/null 2>&1; then
-  echo "npm command not found on remote server." >&2
-  exit 1
-fi
+nohup env HOST="$APP_HOST" PORT="$APP_PORT" npm run start > "$APP_LOG" 2>&1 &
 
-nohup env HOST="$REMOTE_BIND" PORT="$REMOTE_PORT" npm run start > "$REMOTE_LOG" 2>&1 &
-
-echo "4. Verifying health..."
+echo "5. Verifying health..."
 for _ in $(seq 1 20); do
-  if curl -fsS "http://127.0.0.1:${REMOTE_PORT}/api/health"; then
+  if curl -fsS "http://127.0.0.1:${APP_PORT}/api/health"; then
     echo
     echo "Deploy complete."
     exit 0
@@ -73,24 +50,5 @@ for _ in $(seq 1 20); do
 done
 
 echo "Health check failed. Recent service log:" >&2
-tail -n 80 "$REMOTE_LOG" >&2 || true
+tail -n 80 "$APP_LOG" >&2 || true
 exit 1
-REMOTE_SCRIPT
-)
-
-REMOTE_COMMAND=$(printf "REMOTE_DIR=%q REMOTE_BIND=%q REMOTE_PORT=%q REMOTE_LOG=%q bash -c %q" \
-  "$REMOTE_DIR" \
-  "$REMOTE_BIND" \
-  "$REMOTE_PORT" \
-  "$REMOTE_LOG" \
-  "$REMOTE_DEPLOY_SCRIPT")
-
-echo "Uploading and deploying through one password SSH session..."
-tar -C "$ROOT_DIR" \
-  --exclude './.git' \
-  --exclude './data' \
-  --exclude './backups' \
-  --exclude './node_modules' \
-  --exclude './*.log' \
-  --exclude './.DS_Store' \
-  -czf - . | ssh "${SSH_OPTIONS[@]}" "$REMOTE" "$REMOTE_COMMAND"
