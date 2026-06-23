@@ -9,6 +9,12 @@ REMOTE_PORT="${DEPLOY_PORT:-4173}"
 REMOTE_BIND="${DEPLOY_BIND:-0.0.0.0}"
 REMOTE_LOG="${DEPLOY_LOG:-kh-erp.log}"
 REMOTE="${REMOTE_USER}@${REMOTE_HOST}"
+SSH_OPTIONS=(
+  -o PubkeyAuthentication=no
+  -o PreferredAuthentications=password
+  -o NumberOfPasswordPrompts=3
+)
+RSYNC_SSH="ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o NumberOfPasswordPrompts=3"
 
 for cmd in git rsync ssh; do
   command -v "$cmd" >/dev/null 2>&1 || {
@@ -23,10 +29,11 @@ if [[ -n "$(git -C "$ROOT_DIR" status --short)" ]]; then
 fi
 
 echo "1. Backing up remote data..."
-ssh "$REMOTE" "set -e; mkdir -p '$REMOTE_DIR/backups'; if [ -f '$REMOTE_DIR/data/kh-erp-db.json' ]; then cp '$REMOTE_DIR/data/kh-erp-db.json' '$REMOTE_DIR/backups/kh-erp-db-\$(date +%Y%m%d-%H%M%S).json'; fi"
+ssh "${SSH_OPTIONS[@]}" "$REMOTE" "set -e; mkdir -p '$REMOTE_DIR/backups'; if [ -f '$REMOTE_DIR/data/kh-erp-db.json' ]; then cp '$REMOTE_DIR/data/kh-erp-db.json' '$REMOTE_DIR/backups/kh-erp-db-\$(date +%Y%m%d-%H%M%S).json'; fi"
 
 echo "2. Syncing code to server..."
 rsync -az --delete \
+  -e "$RSYNC_SSH" \
   --exclude '.git/' \
   --exclude 'data/' \
   --exclude 'backups/' \
@@ -37,7 +44,7 @@ rsync -az --delete \
   "$REMOTE:$REMOTE_DIR/"
 
 echo "3. Restarting remote service..."
-ssh "$REMOTE" bash -s -- "$REMOTE_DIR" "$REMOTE_BIND" "$REMOTE_PORT" "$REMOTE_LOG" <<'REMOTE_SCRIPT'
+ssh "${SSH_OPTIONS[@]}" "$REMOTE" bash -s -- "$REMOTE_DIR" "$REMOTE_BIND" "$REMOTE_PORT" "$REMOTE_LOG" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
 remote_dir="$1"
@@ -62,7 +69,7 @@ nohup env HOST="$bind" PORT="$port" npm run start > "$log_file" 2>&1 &
 REMOTE_SCRIPT
 
 echo "4. Verifying health..."
-ssh "$REMOTE" bash -s -- "$REMOTE_PORT" "$REMOTE_DIR/$REMOTE_LOG" <<'REMOTE_SCRIPT'
+ssh "${SSH_OPTIONS[@]}" "$REMOTE" bash -s -- "$REMOTE_PORT" "$REMOTE_DIR/$REMOTE_LOG" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
 port="$1"
