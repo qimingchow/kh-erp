@@ -28,6 +28,19 @@ export function formatNumber(value) {
   return new Intl.NumberFormat("zh-CN").format(Number(value || 0));
 }
 
+export function parseNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const raw = String(value ?? "").trim();
+  if (!raw) return 0;
+  const normalized = raw.replaceAll(",", "").replace(/\s+/g, "").toLowerCase();
+  const kkMatch = normalized.match(/^(-?\d+(?:\.\d+)?)kk$/);
+  if (kkMatch) return Number(kkMatch[1]) * 1000;
+  const kMatch = normalized.match(/^(-?\d+(?:\.\d+)?)k$/);
+  if (kMatch) return Number(kMatch[1]);
+  const numeric = Number(normalized.replace(/[^\d.-]/g, ""));
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
 export function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")

@@ -1,17 +1,18 @@
 import { badge } from "../ui/components.js";
+import { icon } from "../lib/icons.js";
 import { escapeHtml, formatCurrency, formatDate, formatNumber } from "../lib/format.js";
 
 export function renderOverview(state) {
   const flowItems = [
-    { step: "01", title: "来料录入", count: state.inbound.length },
-    { step: "02", title: "检验/排产", count: state.inbound.filter((item) => (item.processes || []).length).length },
-    { step: "03", title: "库存管理", count: state.inventory.length },
-    { step: "04", title: "生产计划", count: state.production.length },
-    { step: "05", title: "机台执行", count: state.machines.filter((item) => item.status === "运行").length },
+    { step: "来料录入", title: "来料录入", count: state.inbound.length, icon: "inbox", tone: "blue" },
+    { step: "销售/客户", title: "出库记录", count: state.outbound.length, icon: "truck", tone: "purple" },
+    { step: "生产计划", title: "生产计划", count: state.production.length, icon: "calendar", tone: "orange" },
     {
-      step: "06",
-      title: "出库/财务",
-      count: state.outbound.length + state.finance.filter((item) => item.status !== "已收").length,
+      step: "财务执行",
+      title: "财务记录",
+      count: state.finance.filter((item) => item.status !== "已收" && item.status !== "已付").length,
+      icon: "landmark",
+      tone: "blue",
     },
   ];
 
@@ -37,12 +38,11 @@ export function renderOverview(state) {
   ].slice(0, 6);
 
   const roadmap = [
-    { title: "供应商/客户档案", text: "把联系人、地址、信用和合作等级统一管理起来。", dot: "blue" },
-    { title: "批次追溯与扫码", text: "从来料到成品都能按批次追踪，减少找货和追责成本。", dot: "teal" },
-    { title: "质检与不良品", text: "支持抽检、返工、报废和原因记录。", dot: "amber" },
-    { title: "盘点与差异分析", text: "定期盘点，自动比对账面与实物差异。", dot: "rose" },
-    { title: "设备保养/故障工单", text: "机台保养计划、停机原因、维修闭环。", dot: "blue" },
-    { title: "权限、审批、日志", text: "让录入、审核、出库、对账都留痕。", dot: "teal" },
+    { title: "供应商/客户档案", text: "统一管理供应商和客户信息，建立完整信用体系。", icon: "users" },
+    { title: "批次追溯与扫码", text: "支持批次追溯和扫码管理，提升库存准确性。", icon: "boxes" },
+    { title: "质检与不良品", text: "质检流程管理，支持不良品记录与分析。", icon: "warning" },
+    { title: "盘点与差异分析", text: "定期盘点，自动对比账面与实物差异。", icon: "chart" },
+    { title: "设备 OEE 分析", text: "设备效率分析，优化生产设备利用率。", icon: "monitor" },
   ];
 
   return `
@@ -50,50 +50,75 @@ export function renderOverview(state) {
       <section class="panel">
         <div class="panel-header">
           <div>
-            <h3>业务流程总览</h3>
-            <p>先把来料、库存、生产、机台、出库和财务串成一条线，后面再逐块加审批、扫码和报表。</p>
+            <h3>业务数据总览</h3>
+            <p>核心业务流程数据概览，按模块汇总今日记录、趋势和状态。</p>
           </div>
-          <div class="small">当前有 ${state.production.filter((item) => item.status !== "已完成").length} 个未完工计划</div>
-        </div>
-        <div class="flow">
-          ${flowItems
-            .map(
-              (item) => `
-                <div class="flow-item">
-                  <div class="step">${escapeHtml(item.step)}</div>
-                  <div class="title">${escapeHtml(item.title)}</div>
-                  <div class="count">${formatNumber(item.count)}</div>
-                </div>
-              `,
-            )
-            .join("")}
+          <button class="btn ghost" type="button">今日</button>
         </div>
 
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>日期</th>
-                <th>节点</th>
-                <th>说明</th>
+                <th>业务模块</th>
+                <th>今日数据</th>
+                <th>较昨日</th>
+                <th>较上周</th>
                 <th>状态</th>
               </tr>
             </thead>
             <tbody>
-              ${recent
+              ${flowItems
                 .map(
                   (item) => `
                     <tr>
-                      <td>${escapeHtml(formatDate(item.date))}</td>
-                      <td>${escapeHtml(item.name)}</td>
-                      <td>${escapeHtml(item.detail)}</td>
-                      <td>${badge(item.status)}</td>
+                      <td>
+                        <div class="module-cell">
+                          <span class="module-icon ${escapeHtml(item.tone)}">${icon(item.icon)}</span>
+                          <strong>${escapeHtml(item.title)}</strong>
+                        </div>
+                      </td>
+                      <td><strong>${formatNumber(item.count)}</strong></td>
+                      <td><span class="trend-flat">— 0%</span></td>
+                      <td><span class="trend-flat">— 0%</span></td>
+                      <td>${badge("正常")}</td>
                     </tr>
                   `,
                 )
                 .join("")}
             </tbody>
           </table>
+        </div>
+
+        <div class="overview-subgrid">
+          <div class="overview-metric">
+            <span class="module-icon blue">${icon("boxes")}</span>
+            <div>
+              <strong>${formatNumber(state.inventory.length)}</strong>
+              <span>物料总数</span>
+            </div>
+          </div>
+          <div class="overview-metric">
+            <span class="module-icon green">${icon("boxes")}</span>
+            <div>
+              <strong>${formatNumber(state.inventory.reduce((total, item) => total + Number(item.qty || 0), 0))}</strong>
+              <span>库存总数</span>
+            </div>
+          </div>
+          <div class="overview-metric">
+            <span class="module-icon orange">${icon("warning")}</span>
+            <div>
+              <strong>${formatNumber(state.inventory.filter((item) => item.qty <= item.safe).length)}</strong>
+              <span>预警物料</span>
+            </div>
+          </div>
+          <div class="overview-metric">
+            <span class="module-icon blue">${icon("chart")}</span>
+            <div>
+              <strong>${formatNumber(state.production.filter((item) => item.status !== "已完成").length)}</strong>
+              <span>周转天数</span>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -104,16 +129,17 @@ export function renderOverview(state) {
             <p>这是一个比较适合工厂 ERP 的扩展顺序，后面可以按优先级逐步做。</p>
           </div>
         </div>
-        <div class="roadmap">
+        <div class="roadmap recommended-list">
           ${roadmap
             .map(
               (item) => `
                 <div class="roadmap-item">
-                  <span class="dot ${item.dot}"></span>
+                  <span class="module-icon blue">${icon(item.icon)}</span>
                   <div>
                     <strong>${escapeHtml(item.title)}</strong>
                     <div class="small">${escapeHtml(item.text)}</div>
                   </div>
+                  <span class="checkmark">${icon("check")}</span>
                 </div>
               `,
             )

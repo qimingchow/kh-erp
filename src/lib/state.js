@@ -190,8 +190,27 @@ function normalizeOutboundRecord(item, index = 0, inventory = [], finance = []) 
   const qty = Number(item.qty || 0);
   const unitPrice = Number(item.unitPrice || 0);
   const amount = item.amount !== undefined && item.amount !== "" ? Number(item.amount || 0) : Number((qty * unitPrice).toFixed(2));
+  const settlement = item.settlement || matchedFinance?.status || "待收";
+  const paidFromFinance = matchedFinance?.paidAmount;
+  let paidAmount =
+    item.paidAmount !== undefined
+      ? Number(item.paidAmount || 0)
+      : paidFromFinance !== undefined
+        ? Number(paidFromFinance || 0)
+        : settlement === "已收"
+          ? amount
+          : 0;
+  if (settlement === "待收") paidAmount = 0;
+  if (settlement === "已收") paidAmount = amount;
+  paidAmount = Math.max(0, Math.min(amount, paidAmount));
+  const remainingAmount =
+    item.remainingAmount !== undefined ? Math.max(0, Number(item.remainingAmount || 0)) : Math.max(0, amount - paidAmount);
 
   if (matchedFinance && item.id && !matchedFinance.outboundId) matchedFinance.outboundId = item.id;
+  if (matchedFinance) {
+    matchedFinance.paidAmount = paidAmount;
+    matchedFinance.remainingAmount = remainingAmount;
+  }
 
   return {
     id: item.id || `out-${String(index + 1).padStart(3, "0")}`,
@@ -206,11 +225,48 @@ function normalizeOutboundRecord(item, index = 0, inventory = [], finance = []) 
     unit: item.unit || matchedStock?.unit || "",
     unitPrice,
     amount,
+    paidAmount,
+    remainingAmount,
     warehouse: item.warehouse || matchedStock?.location || "",
     logistics: item.logistics || "",
-    settlement: item.settlement || matchedFinance?.status || "待收",
+    settlement,
     note: item.note || "",
     updatedAt: item.updatedAt || item.date || todayString(),
+  };
+}
+
+function normalizeProductionRecord(item, index = 0) {
+  let progress = Math.max(0, Math.min(100, Number(item.progress || 0)));
+  let status = item.status || "待排产";
+  if (status === "已完成" || progress >= 100) {
+    status = "已完成";
+    progress = 100;
+  } else if (progress <= 0) {
+    status = "待排产";
+    progress = 0;
+  } else if (status === "待排产") {
+    status = "进行中";
+  }
+
+  return {
+    id: item.id || `plan-${String(index + 1).padStart(3, "0")}`,
+    planNo: item.planNo || "",
+    orderNo: item.orderNo || "",
+    item: item.item || "",
+    qty: Number(item.qty || 0),
+    unit: item.unit || "K",
+    unitPrice: item.unitPrice ?? "",
+    amount: item.amount ?? "",
+    dueDate: item.dueDate || todayString(),
+    machineId: item.machineId || "",
+    priority: item.priority || "标准",
+    status,
+    progress,
+    note: item.note || "",
+    inventoryId: item.inventoryId || "",
+    stockedQty: Number(item.stockedQty || 0),
+    stockedAt: item.stockedAt || "",
+    updatedAt: item.updatedAt || item.dueDate || todayString(),
   };
 }
 
@@ -223,6 +279,9 @@ function migrateState(raw) {
   next.outbound = Array.isArray(raw.outbound)
     ? raw.outbound.map((item, index) => normalizeOutboundRecord(item, index, next.inventory, next.finance || []))
     : base.outbound;
+  next.production = Array.isArray(raw.production)
+    ? raw.production.map((item, index) => normalizeProductionRecord(item, index))
+    : base.production;
   next.machines = Array.isArray(raw.machines) ? raw.machines.map((item, index) => normalizeMachineRecord(item, index)) : base.machines;
   return next;
 }

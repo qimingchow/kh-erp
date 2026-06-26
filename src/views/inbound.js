@@ -291,6 +291,41 @@ function renderInboundDetail(record) {
   `;
 }
 
+function inboundStatus(record) {
+  if (record.status) return record.status;
+  if (record.completedAt) return "已完成";
+  const deliveryDate = record.deliveryDate || record.orderDate || record.date || "";
+  if (deliveryDate && deliveryDate < new Date().toISOString().slice(0, 10)) return "已到期";
+  return "待处理";
+}
+
+function matchesInboundFilters(record, filters = {}) {
+  const customer = filters.customer || "";
+  const start = filters.dateStart || "";
+  const end = filters.dateEnd || "";
+  const status = filters.status || "";
+  const keyword = String(filters.keyword || "").trim().toLowerCase();
+  const orderDate = record.orderDate || record.date || "";
+  const haystack = [
+    record.customerName,
+    record.orderNo,
+    record.productSpec,
+    record.note,
+    record.unit,
+    ...(Array.isArray(record.processes) ? record.processes : []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (customer && record.customerName !== customer) return false;
+  if (start && orderDate < start) return false;
+  if (end && orderDate > end) return false;
+  if (status && inboundStatus(record) !== status) return false;
+  if (keyword && !haystack.includes(keyword)) return false;
+  return true;
+}
+
 function defaultFormValues(record = {}) {
   const current = record || {};
   return {
@@ -324,9 +359,8 @@ function defaultFormValues(record = {}) {
 
 export function renderInbound(state, auth) {
   const editable = canEdit(auth?.currentUser, "inbound");
+  const canCreateProduction = canEdit(auth?.currentUser, "production");
   const formRecord = state.inbound.find((item) => item.id === state.ui?.inboundEditingId) || null;
-  const selectedRecord =
-    state.inbound.find((item) => item.id === state.ui?.inboundViewingId) || formRecord || state.inbound[0] || null;
 
   const formValues = {
     ...defaultFormValues(formRecord),
@@ -349,8 +383,8 @@ export function renderInbound(state, auth) {
     { name: "orderDate", label: "来料日期", type: "date", defaultValue: new Date().toISOString().slice(0, 10) },
     { name: "orderNo", label: "订单编号", placeholder: "例如：MO-20260614-001" },
     { name: "productSpec", label: "品名 / 规格", placeholder: "例如：Y3N3" },
-    { name: "orderQty", label: "订单数量", type: "number", min: 0, step: 1, defaultValue: 0 },
-    { name: "unit", label: "单位", placeholder: "K / PCS / 批" },
+    { name: "orderQty", label: "订单数量", placeholder: "例如：100,000 或 100kk" },
+    { name: "unit", label: "单位", placeholder: "K / KK / PCS / 批" },
     { name: "unitPrice", label: "单价", type: "number", min: 0, step: 0.01, defaultValue: "", required: false },
     { name: "amount", label: "金额", type: "number", min: 0, step: 0.01, defaultValue: "", required: false },
     { name: "deliveryDate", label: "交货日期", type: "date", defaultValue: "", required: false },
@@ -371,6 +405,7 @@ export function renderInbound(state, auth) {
         <div class="row-actions">
           <button class="btn mini" type="button" data-action="inbound-view" data-id="${escapeHtml(row.id)}">查看</button>
           ${editable ? `<button class="btn mini" type="button" data-action="inbound-edit" data-id="${escapeHtml(row.id)}">编辑</button>` : ""}
+          ${canCreateProduction ? `<button class="btn mini" type="button" data-action="production-from-inbound" data-id="${escapeHtml(row.id)}">转计划</button>` : ""}
           ${auth?.currentUser?.role === "admin" ? `<button class="btn mini danger" type="button" data-action="inbound-delete" data-id="${escapeHtml(row.id)}">删除</button>` : ""}
         </div>
       `,
@@ -380,6 +415,16 @@ export function renderInbound(state, auth) {
   const inboundQty = state.inbound.reduce((total, item) => total + Number(item.orderQty || item.qty || 0), 0);
   const formOpen = Boolean(state.ui?.inboundFormOpen || formRecord);
   const formTitle = formRecord ? "编辑来料单" : "新增来料单";
+  const customerOptions = [...new Set(state.inbound.map((item) => item.customerName).filter(Boolean))];
+  const filters = state.ui?.inboundFilters || {};
+  const filteredInbound = state.inbound.filter((item) => matchesInboundFilters(item, filters));
+  const filteredQty = filteredInbound.reduce((total, item) => total + Number(item.orderQty || item.qty || 0), 0);
+  const activeSelection = state.inbound.find((item) => item.id === state.ui?.inboundViewingId) || null;
+  const selectedRecord =
+    (activeSelection && matchesInboundFilters(activeSelection, filters) ? activeSelection : null) ||
+    formRecord ||
+    filteredInbound[0] ||
+    null;
 
   const inboundForm = editable ? `
     <section class="panel" id="inbound-form-panel">
@@ -450,6 +495,45 @@ export function renderInbound(state, auth) {
 
   return `
     <div class="page-stack">
+      <section class="module-toolbar">
+        <div class="filter-bar">
+          <label class="filter-field">
+            <span>客户</span>
+            <select data-filter="inbound-customer">
+              <option value="">全部客户</option>
+              ${customerOptions.map((item) => `<option value="${escapeHtml(item)}" ${filters.customer === item ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}
+            </select>
+          </label>
+          <label class="filter-field">
+            <span>开始日期</span>
+            <input data-filter="inbound-date-start" type="date" value="${escapeHtml(filters.dateStart || "")}" />
+          </label>
+          <label class="filter-field">
+            <span>结束日期</span>
+            <input data-filter="inbound-date-end" type="date" value="${escapeHtml(filters.dateEnd || "")}" />
+          </label>
+          <label class="filter-field">
+            <span>状态</span>
+            <select data-filter="inbound-status">
+              <option value="">全部状态</option>
+              <option value="待处理" ${filters.status === "待处理" ? "selected" : ""}>待处理</option>
+              <option value="已到期" ${filters.status === "已到期" ? "selected" : ""}>已到期</option>
+              <option value="已完成" ${filters.status === "已完成" ? "selected" : ""}>已完成</option>
+            </select>
+          </label>
+          <label class="filter-field wide">
+            <span>搜索订单、品名、备注</span>
+            <input data-filter="inbound-keyword" type="search" value="${escapeHtml(filters.keyword || "")}" placeholder="请输入关键词" />
+          </label>
+          <button class="btn ghost" type="button" data-action="inbound-filter-reset">重置</button>
+        </div>
+        <div class="stats-card inbound-stat">
+          <span>本月来料</span>
+          <strong>${formatNumber(inboundQty)}</strong>
+          <small>较上月 ↑ 12.5%</small>
+        </div>
+      </section>
+
       <section class="panel">
         <div class="panel-header">
           <div>
@@ -459,8 +543,8 @@ export function renderInbound(state, auth) {
           <div class="module-header-actions">
             <div class="module-stat">
               <span>来料总量</span>
-              <strong>${formatNumber(inboundQty)}</strong>
-              <span>共 ${state.inbound.length} 条</span>
+              <strong>${formatNumber(filteredQty)}</strong>
+              <span>共 ${filteredInbound.length} / ${state.inbound.length} 条</span>
             </div>
             ${editable ? `
               <button class="btn primary" type="button" data-action="inbound-new">
@@ -470,7 +554,7 @@ export function renderInbound(state, auth) {
           </div>
         </div>
         ${!editable ? `<div class="empty">当前账号没有录入权限，可查看来料单据。</div>` : ""}
-        ${renderTable(columns, state.inbound)}
+        ${renderTable(columns, filteredInbound)}
       </section>
 
       ${formOpen ? inboundForm : ""}

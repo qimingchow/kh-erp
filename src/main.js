@@ -31,6 +31,8 @@ import {
   deleteOutbound,
   deleteFinance,
   updateMachine,
+  importMachines,
+  productionToInventory,
   financeRecordFromForm,
   inboundRecordFromForm,
   inventoryRecordFromForm,
@@ -54,6 +56,8 @@ import {
   saveProductionRemote,
   saveFinanceRemote,
   saveUserRemote,
+  importMachinesRemote,
+  stockInProductionRemote,
   updateMachineRemote,
 } from "./lib/api.js";
 import { renderOverview } from "./views/overview.js";
@@ -107,11 +111,31 @@ function renderNav(state) {
 function renderAuthBar(auth, currentUser) {
   if (currentUser) {
     elements.auth.innerHTML = `
+      <button class="header-icon-btn" type="button" aria-label="折叠菜单">
+        <span class="icon">${icon("menu")}</span>
+      </button>
       <div class="auth-meta">
         <div class="auth-title">${escapeHtml(currentUser.name)} · ${escapeHtml(ROLE_LABELS[currentUser.role] || currentUser.role)}</div>
         <div class="auth-sub">当前账号：${escapeHtml(currentUser.username)}，${currentUser.role === "admin" ? "拥有全部操作权限" : `可编辑：${escapeHtml((currentUser.editableResources || ["inbound"]).map((item) => RESOURCE_LABELS[item] || item).join("、"))}`}</div>
       </div>
+      <label class="global-search" aria-label="全局搜索">
+        <span class="icon">${icon("search")}</span>
+        <input type="search" placeholder="搜索客户 / 订单 / 物料" />
+      </label>
       <div class="auth-actions">
+        <button class="header-icon-btn" type="button" aria-label="通知">
+          <span class="icon">${icon("bell")}</span>
+          <span class="notify-dot">3</span>
+        </button>
+        <button class="header-icon-btn" type="button" aria-label="帮助">
+          <span class="icon">${icon("help")}</span>
+        </button>
+        <button class="header-icon-btn" type="button" aria-label="设置">
+          <span class="icon">${icon("settings")}</span>
+        </button>
+        <div class="user-chip">
+          <span>${escapeHtml((currentUser.name || currentUser.username || "KH").slice(0, 2).toUpperCase())}</span>
+        </div>
         <button class="btn ghost" data-action="logout" type="button">退出登录</button>
       </div>
     `;
@@ -126,6 +150,9 @@ function renderAuthBar(auth, currentUser) {
     `;
 
   elements.auth.innerHTML = `
+    <button class="header-icon-btn" type="button" aria-label="折叠菜单">
+      <span class="icon">${icon("menu")}</span>
+    </button>
     <div class="auth-meta">
       <div class="auth-title">登录账号</div>
       <div class="auth-sub">${isServerMode() ? "服务器模式已启用，数据将保存到后端。" : "当前为本地预览模式，数据只保存在浏览器。管理员：admin / admin123；录单人员：clerk / clerk123"}</div>
@@ -151,24 +178,37 @@ function renderKpis(state) {
   const stockQty = sum(state.inventory, (item) => item.qty);
   const runningMachines = state.machines.filter((item) => item.status === "运行").length;
   const pendingPlans = state.production.filter((item) => item.status !== "已完成").length;
-  const pendingReceivable = sum(state.finance, (item) => (item.type === "应收" && item.status !== "已收" ? item.amount : 0));
+  const pendingReceivable = sum(state.finance, (item) => {
+    if (item.type !== "应收") return 0;
+    const amount = Number(item.amount || 0);
+    const paid =
+      item.status === "已收"
+        ? amount
+        : item.status === "部分收款"
+          ? Math.max(0, Math.min(amount, Number(item.paidAmount || 0)))
+          : 0;
+    return Math.max(0, amount - paid);
+  });
   const lowStock = state.inventory.filter((item) => item.qty <= item.safe).length;
 
   const items = [
-    { label: "来料总量", value: formatNumber(inboundQty), hint: "近期开票批次合计" },
-    { label: "当前库存", value: formatNumber(stockQty), hint: `${lowStock} 个物料低于安全库存` },
-    { label: "在制计划", value: formatNumber(pendingPlans), hint: "排产中和待排产订单" },
-    { label: "运行机台", value: formatNumber(runningMachines), hint: "在线设备状态" },
-    { label: "待收账款", value: formatCurrency(pendingReceivable), hint: "出库后待回款金额" },
+    { label: "待处理来料", value: formatNumber(inboundQty), hint: "较昨日 0", icon: "inbox", tone: "blue" },
+    { label: "当前库存", value: formatNumber(stockQty), hint: `${lowStock} 个物料预警`, icon: "boxes", tone: "green" },
+    { label: "在制计划", value: formatNumber(pendingPlans), hint: "排产中和待排产", icon: "calendar", tone: "amber" },
+    { label: "运行机台", value: formatNumber(runningMachines), hint: "在线设备状态", icon: "monitor", tone: "blue" },
+    { label: "待收账款", value: formatCurrency(pendingReceivable), hint: "出库后待回款", icon: "landmark", tone: "red" },
   ];
 
   elements.kpis.innerHTML = items
     .map(
       (item) => `
-        <div class="kpi">
-          <div class="label">${escapeHtml(item.label)}</div>
-          <div class="value">${item.value}</div>
-          <div class="hint">${escapeHtml(item.hint)}</div>
+        <div class="kpi ${escapeHtml(item.tone)}">
+          <div class="kpi-icon"><span class="icon">${icon(item.icon)}</span></div>
+          <div>
+            <div class="label">${escapeHtml(item.label)}</div>
+            <div class="value">${item.value}</div>
+            <div class="hint">${escapeHtml(item.hint)} <span>— 0%</span></div>
+          </div>
         </div>
       `,
     )
@@ -253,6 +293,49 @@ function syncInboundStandardSections(root = document) {
   });
 }
 
+function updateInboundFiltersFromDom() {
+  const activeFilter = document.activeElement?.getAttribute?.("data-filter") || "";
+  const activeSelectionStart =
+    typeof document.activeElement?.selectionStart === "number" ? document.activeElement.selectionStart : null;
+  setUi({
+    inboundFilters: {
+      customer: document.querySelector('[data-filter="inbound-customer"]')?.value || "",
+      dateStart: document.querySelector('[data-filter="inbound-date-start"]')?.value || "",
+      dateEnd: document.querySelector('[data-filter="inbound-date-end"]')?.value || "",
+      status: document.querySelector('[data-filter="inbound-status"]')?.value || "",
+      keyword: document.querySelector('[data-filter="inbound-keyword"]')?.value || "",
+    },
+  });
+  render();
+  if (!activeFilter) return;
+  const nextActive = document.querySelector(`[data-filter="${CSS.escape(activeFilter)}"]`);
+  nextActive?.focus();
+  if (activeSelectionStart !== null && typeof nextActive?.setSelectionRange === "function") {
+    nextActive.setSelectionRange(activeSelectionStart, activeSelectionStart);
+  }
+}
+
+function updateMachineFiltersFromDom() {
+  const activeFilter = document.activeElement?.getAttribute?.("data-machine-filter") || "";
+  const activeSelectionStart =
+    typeof document.activeElement?.selectionStart === "number" ? document.activeElement.selectionStart : null;
+  setUi({
+    machineFilters: {
+      keyword: document.querySelector('[data-machine-filter="keyword"]')?.value || "",
+      type: document.querySelector('[data-machine-filter="type"]')?.value || "",
+      status: document.querySelector('[data-machine-filter="status"]')?.value || "",
+    },
+    machineVisibleLimit: 24,
+  });
+  render();
+  if (!activeFilter) return;
+  const nextActive = document.querySelector(`[data-machine-filter="${CSS.escape(activeFilter)}"]`);
+  nextActive?.focus();
+  if (activeSelectionStart !== null && typeof nextActive?.setSelectionRange === "function") {
+    nextActive.setSelectionRange(activeSelectionStart, activeSelectionStart);
+  }
+}
+
 function render() {
   const state = getState();
   const auth = getAuth();
@@ -283,6 +366,94 @@ async function syncFromServer() {
 function listText(value) {
   if (Array.isArray(value)) return value.join("、");
   return value ?? "";
+}
+
+function numericInputValue(input) {
+  const raw = String(input?.value || "").trim();
+  if (!raw) return 0;
+  const normalized = raw.replaceAll(",", "").replace(/\s+/g, "").toLowerCase();
+  const kkMatch = normalized.match(/^(-?\d+(?:\.\d+)?)kk$/);
+  if (kkMatch) return Number(kkMatch[1]) * 1000;
+  const kMatch = normalized.match(/^(-?\d+(?:\.\d+)?)k$/);
+  if (kMatch) return Number(kMatch[1]);
+  const numeric = Number(normalized.replace(/[^\d.-]/g, ""));
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function syncQuantityAmount(form) {
+  if (!form || !["inbound", "production", "outbound"].includes(form.dataset.form)) return;
+  const qtyInput = form.querySelector('input[name="orderQty"], input[name="qty"]');
+  const priceInput = form.querySelector('input[name="unitPrice"]');
+  const amountInput = form.querySelector('input[name="amount"]');
+  const computedAmount = form.querySelector("[data-computed-amount]");
+  const paidInput = form.querySelector('input[name="paidAmount"]');
+  const settlementInput = form.querySelector('select[name="settlement"]');
+  if (!qtyInput || !priceInput || (!amountInput && !computedAmount)) return;
+  const qty = numericInputValue(qtyInput);
+  const unitPrice = numericInputValue(priceInput);
+  if (!qty || !unitPrice) {
+    if (computedAmount) computedAmount.textContent = `预计应收金额：${formatCurrency(0)}`;
+    return;
+  }
+  const amount = Number((qty * unitPrice).toFixed(2));
+  if (amountInput) amountInput.value = String(amount);
+  if (paidInput && settlementInput) {
+    if (settlementInput.value === "已收") {
+      paidInput.value = String(amount);
+    } else if (settlementInput.value === "待收") {
+      paidInput.value = "0";
+    }
+  }
+  const paidAmount = paidInput ? Math.max(0, Math.min(amount, numericInputValue(paidInput))) : 0;
+  const remainingAmount = Math.max(0, amount - paidAmount);
+  if (computedAmount) {
+    computedAmount.textContent = `预计应收金额：${formatCurrency(amount)}；已收：${formatCurrency(paidAmount)}；未收：${formatCurrency(remainingAmount)}`;
+  }
+}
+
+function syncProductionStatusProgress(form, changedName = "") {
+  if (!form || form.dataset.form !== "production") return;
+  const statusInput = form.querySelector('select[name="status"]');
+  const progressInput = form.querySelector('input[name="progress"]');
+  if (!statusInput || !progressInput) return;
+
+  let progress = Math.max(0, Math.min(100, Number(progressInput.value || 0)));
+  let status = statusInput.value || "待排产";
+
+  if (changedName === "status") {
+    if (status === "已完成") progress = 100;
+    if (status === "待排产") progress = 0;
+    if (status === "进行中" && progress <= 0) progress = 1;
+  } else {
+    if (progress >= 100) {
+      progress = 100;
+      status = "已完成";
+    } else if (progress <= 0) {
+      progress = 0;
+      status = "待排产";
+    } else if (status === "待排产" || status === "已完成") {
+      status = "进行中";
+    }
+  }
+
+  progressInput.value = String(progress);
+  statusInput.value = status;
+}
+
+function syncOutboundInventoryPrice(form) {
+  if (!form || form.dataset.form !== "outbound") return;
+  const inventorySelect = form.querySelector('select[name="inventoryId"]');
+  const priceInput = form.querySelector('input[name="unitPrice"]');
+  if (!inventorySelect || !priceInput) return;
+  const stock = getState().inventory.find((item) => item.id === inventorySelect.value);
+  if (stock) priceInput.value = String(stock.cost || 0);
+  syncQuantityAmount(form);
+}
+
+function formatQuantityInput(input) {
+  const value = numericInputValue(input);
+  if (!value) return;
+  input.value = formatNumber(value);
 }
 
 function excelText(value) {
@@ -412,11 +583,17 @@ function buildExcelWorkbook(state) {
         { label: "订单编号", value: (row) => row.orderNo },
         { label: "品名", value: (row) => row.item },
         { label: "数量", value: (row) => row.qty },
+        { label: "单位", value: (row) => row.unit },
+        { label: "单价", value: (row) => row.unitPrice },
+        { label: "金额", value: (row) => row.amount },
         { label: "交期", value: (row) => row.dueDate },
         { label: "机台ID", value: (row) => row.machineId },
         { label: "优先级", value: (row) => row.priority },
         { label: "状态", value: (row) => row.status },
         { label: "进度", value: (row) => row.progress },
+        { label: "库存ID", value: (row) => row.inventoryId },
+        { label: "入库数量", value: (row) => row.stockedQty },
+        { label: "入库日期", value: (row) => row.stockedAt },
         { label: "备注", value: (row) => row.note },
       ],
     },
@@ -481,29 +658,128 @@ function exportExcel() {
   URL.revokeObjectURL(url);
 }
 
-function newRecord() {
-  const state = getState();
-  const currentUser = getCurrentUser();
-  if (!currentUser) {
-    alert("请先登录账号。");
-    return;
+function downloadTextFile(filename, content, type = "text/plain;charset=utf-8") {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function machineTemplateCsv() {
+  return [
+    "机台ID,机台类型,机台名称,区域,状态,当前任务,操作员,班次,进度,最近更新",
+    "sorter-001,分选机,分选机 S-001,分选区,待机,等待排产,张工,白班,0,2026-06-24 08:00",
+    "tester-001,测试机,测试机 T-001,测试区,待机,等待排产,李工,白班,0,2026-06-24 08:00",
+  ].join("\n");
+}
+
+function exportMachineCsv() {
+  const rows = getState().machines.map((machine) => [
+    machine.id,
+    machine.type,
+    machine.name,
+    machine.area,
+    machine.status,
+    machine.job,
+    machine.operator,
+    machine.shift,
+    machine.progress,
+    machine.updatedAt,
+  ]);
+  const csv = [
+    "机台ID,机台类型,机台名称,区域,状态,当前任务,操作员,班次,进度,最近更新",
+    ...rows.map((row) => row.map((cell) => `"${String(cell ?? "").replaceAll('"', '""')}"`).join(",")),
+  ].join("\n");
+  downloadTextFile(`坤禾半导体机台清单-${new Date().toISOString().slice(0, 10)}.csv`, `\ufeff${csv}`, "text/csv;charset=utf-8");
+}
+
+function splitCsvLine(line) {
+  const cells = [];
+  let current = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+    if (char === '"' && quoted && next === '"') {
+      current += '"';
+      index += 1;
+      continue;
+    }
+    if (char === '"') {
+      quoted = !quoted;
+      continue;
+    }
+    if (char === "," && !quoted) {
+      cells.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
   }
-  const formViews = ["inbound", "inventory", "outbound", "production", "finance"];
-  const currentTarget = formViews.includes(state.active) ? state.active : "inbound";
-  const target = canEdit(currentUser, FORM_RESOURCE[currentTarget]) ? currentTarget : "inbound";
-  setActive(target);
-  if (target === "inbound") {
-    setUi({
-      inboundEditingId: null,
-      inboundViewingId: null,
-      inboundFormOpen: true,
-    });
-  }
-  render();
-  const targetElement = target === "inbound"
-    ? document.getElementById("inbound-form-panel")
-    : document.querySelector(`form[data-form="${target}"]`);
-  targetElement?.scrollIntoView({ behavior: "smooth", block: "start" });
+  cells.push(current.trim());
+  return cells;
+}
+
+function parseMachineCsv(text) {
+  const lines = String(text || "")
+    .replace(/^\ufeff/, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) return [];
+
+  const headers = splitCsvLine(lines[0]);
+  const findIndex = (...names) => headers.findIndex((header) => names.includes(header));
+  const indexes = {
+    id: findIndex("机台ID", "id", "ID"),
+    type: findIndex("机台类型", "类型", "type"),
+    name: findIndex("机台名称", "名称", "name"),
+    area: findIndex("区域", "area"),
+    status: findIndex("状态", "status"),
+    job: findIndex("当前任务", "任务", "job"),
+    operator: findIndex("操作员", "负责人", "operator"),
+    shift: findIndex("班次", "shift"),
+    progress: findIndex("进度", "progress"),
+    updatedAt: findIndex("最近更新", "更新时间", "updatedAt"),
+  };
+
+  return lines.slice(1).map((line, index) => {
+    const cells = splitCsvLine(line);
+    const pick = (key) => (indexes[key] >= 0 ? cells[indexes[key]] || "" : "");
+    return {
+      id: pick("id") || `machine-${String(index + 1).padStart(3, "0")}`,
+      type: pick("type"),
+      name: pick("name"),
+      area: pick("area"),
+      status: pick("status"),
+      job: pick("job"),
+      operator: pick("operator"),
+      shift: pick("shift"),
+      progress: Number(pick("progress") || 0),
+      updatedAt: pick("updatedAt"),
+    };
+  });
+}
+
+function financeDraftForQuickAction(kind) {
+  const presets = {
+    receipt: { type: "收款", status: "已收", source: "快捷收款", method: "转账" },
+    payment: { type: "付款", status: "已付", source: "快捷付款", method: "转账" },
+    expense: { type: "付款", status: "待付", source: "费用报销", method: "转账" },
+    transfer: { type: "付款", status: "已付", source: "转账记录", method: "转账" },
+    invoice: { type: "应收", status: "待收", source: "开票管理", method: "月结" },
+    reconcile: { type: "应收", status: "待收", source: "对账管理", method: "月结" },
+  };
+  return {
+    date: new Date().toISOString().slice(0, 10),
+    counterparty: "",
+    amount: 0,
+    note: "",
+    ...(presets[kind] || presets.receipt),
+  };
 }
 
 function ensureCanEdit(resource) {
@@ -609,13 +885,52 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  if (action === "new-record") {
-    newRecord();
+  if (action === "machine-export") {
+    exportMachineCsv();
+    return;
+  }
+
+  if (action === "machine-template") {
+    downloadTextFile("坤禾半导体机台导入模板.csv", `\ufeff${machineTemplateCsv()}`, "text/csv;charset=utf-8");
+    return;
+  }
+
+  if (action === "machine-filter-reset") {
+    setUi({
+      machineFilters: {
+        keyword: "",
+        type: "",
+        status: "",
+      },
+      machineVisibleLimit: 24,
+    });
+    render();
+    return;
+  }
+
+  if (action === "machine-show-more") {
+    const currentLimit = Number(getState().ui?.machineVisibleLimit || 24);
+    setUi({ machineVisibleLimit: currentLimit + 24 });
+    render();
     return;
   }
 
   if (action === "print-inbound") {
     window.print();
+    return;
+  }
+
+  if (action === "inbound-filter-reset") {
+    setUi({
+      inboundFilters: {
+        customer: "",
+        dateStart: "",
+        dateEnd: "",
+        status: "",
+        keyword: "",
+      },
+    });
+    render();
     return;
   }
 
@@ -700,8 +1015,21 @@ document.addEventListener("click", (event) => {
     setUi({
       inventoryViewingId: button.getAttribute("data-id"),
       inventoryEditingId: null,
+      inventoryFormOpen: false,
     });
     render();
+    return;
+  }
+
+  if (action === "inventory-new") {
+    if (!ensureCanEdit("inventory")) return;
+    setUi({
+      inventoryViewingId: null,
+      inventoryEditingId: null,
+      inventoryFormOpen: true,
+    });
+    render();
+    document.getElementById("inventory-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
@@ -711,14 +1039,15 @@ document.addEventListener("click", (event) => {
     setUi({
       inventoryViewingId: id,
       inventoryEditingId: id,
+      inventoryFormOpen: true,
     });
     render();
-    document.querySelector('form[data-form="inventory"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById("inventory-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
   if (action === "inventory-cancel") {
-    clearUi(["inventoryEditingId"]);
+    clearUi(["inventoryEditingId", "inventoryFormOpen"]);
     render();
     return;
   }
@@ -759,8 +1088,22 @@ document.addEventListener("click", (event) => {
     setUi({
       outboundViewingId: button.getAttribute("data-id"),
       outboundEditingId: null,
+      outboundFormOpen: false,
     });
     render();
+    document.getElementById("outbound-detail-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  if (action === "outbound-new") {
+    if (!ensureCanEdit("outbound")) return;
+    setUi({
+      outboundViewingId: null,
+      outboundEditingId: null,
+      outboundFormOpen: true,
+    });
+    render();
+    document.getElementById("outbound-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
@@ -770,14 +1113,15 @@ document.addEventListener("click", (event) => {
     setUi({
       outboundViewingId: id,
       outboundEditingId: id,
+      outboundFormOpen: true,
     });
     render();
-    document.querySelector('form[data-form="outbound"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById("outbound-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
   if (action === "outbound-cancel") {
-    clearUi(["outboundEditingId"]);
+    clearUi(["outboundEditingId", "outboundFormOpen"]);
     render();
     return;
   }
@@ -809,8 +1153,38 @@ document.addEventListener("click", (event) => {
     setUi({
       productionViewingId: button.getAttribute("data-id"),
       productionEditingId: null,
+      productionFormOpen: false,
+      productionDraftInboundId: null,
     });
     render();
+    document.getElementById("production-detail-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  if (action === "production-new") {
+    if (!ensureCanEdit("production")) return;
+    setUi({
+      productionViewingId: null,
+      productionEditingId: null,
+      productionFormOpen: true,
+      productionDraftInboundId: null,
+    });
+    render();
+    document.getElementById("production-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  if (action === "production-from-inbound") {
+    if (!ensureCanEdit("production")) return;
+    setActive("production");
+    setUi({
+      productionViewingId: null,
+      productionEditingId: null,
+      productionFormOpen: true,
+      productionDraftInboundId: button.getAttribute("data-id"),
+    });
+    render();
+    document.getElementById("production-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
@@ -820,14 +1194,16 @@ document.addEventListener("click", (event) => {
     setUi({
       productionViewingId: id,
       productionEditingId: id,
+      productionFormOpen: true,
+      productionDraftInboundId: null,
     });
     render();
-    document.querySelector('form[data-form="production"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById("production-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
   if (action === "production-cancel") {
-    clearUi(["productionEditingId"]);
+    clearUi(["productionEditingId", "productionFormOpen", "productionDraftInboundId"]);
     render();
     return;
   }
@@ -850,6 +1226,31 @@ document.addEventListener("click", (event) => {
     } else {
       const result = mutateState((draft) => deleteProduction(draft, id));
       if (result.ok === false) alert(result.message || "删除失败");
+      render();
+    }
+    return;
+  }
+
+  if (action === "production-stock-in") {
+    if (!ensureCanEdit("production") || !ensureCanEdit("inventory")) return;
+    const id = button.getAttribute("data-id");
+    if (!confirm("确认将该生产计划转入库存？转入后不能重复入库。")) return;
+
+    if (isServerMode()) {
+      stockInProductionRemote(id, getAuthToken())
+        .then((payload) => {
+          assignRecordState(payload);
+          setActive("inventory");
+          render();
+        })
+        .catch((error) => alert(error.message || "转库存失败"));
+    } else {
+      const result = mutateState((draft) => productionToInventory(draft, id));
+      if (result.ok === false) {
+        alert(result.message || "转库存失败");
+        return;
+      }
+      setActive("inventory");
       render();
     }
     return;
@@ -929,21 +1330,60 @@ document.addEventListener("click", (event) => {
   }
 
   if (action === "finance-view") {
-    setUi({ financeViewingId: button.getAttribute("data-id"), financeEditingId: null });
+    setUi({ financeViewingId: button.getAttribute("data-id"), financeEditingId: null, financeFormOpen: false, financeDraft: null });
     render();
+    return;
+  }
+
+  if (action === "finance-new") {
+    if (!ensureCanEdit("finance")) return;
+    setUi({ financeViewingId: null, financeEditingId: null, financeFormOpen: true, financeDraft: null });
+    render();
+    document.getElementById("finance-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  if (action === "finance-report") {
+    setUi({ financeReportOpen: true });
+    render();
+    document.getElementById("finance-report-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+
+  if (action === "finance-report-close") {
+    setUi({ financeReportOpen: false });
+    render();
+    return;
+  }
+
+  if (action === "finance-quick") {
+    if (!ensureCanEdit("finance")) return;
+    setUi({
+      financeViewingId: null,
+      financeEditingId: null,
+      financeFormOpen: true,
+      financeDraft: financeDraftForQuickAction(button.getAttribute("data-kind")),
+    });
+    render();
+    document.getElementById("finance-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
   if (action === "finance-edit") {
     if (!ensureCanEdit("finance")) return;
-    setUi({ financeViewingId: button.getAttribute("data-id"), financeEditingId: button.getAttribute("data-id") });
+    setUi({
+      financeViewingId: button.getAttribute("data-id"),
+      financeEditingId: button.getAttribute("data-id"),
+      financeFormOpen: true,
+      financeDraft: null,
+    });
     render();
-    document.querySelector('form[data-form="finance"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById("finance-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
   if (action === "finance-cancel") {
-    clearUi(["financeEditingId"]);
+    clearUi(["financeEditingId", "financeFormOpen", "financeDraft"]);
     render();
     return;
   }
@@ -974,6 +1414,16 @@ document.addEventListener("click", (event) => {
   if (action === "user-view") {
     setUi({ userViewingId: button.getAttribute("data-id"), userEditingId: null });
     render();
+    return;
+  }
+
+  if (action === "user-new") {
+    if (!ensureCanEdit("users")) return;
+    setUi({ userViewingId: null, userEditingId: null });
+    render();
+    const panel = document.getElementById("user-form-panel");
+    if (panel) panel.open = true;
+    panel?.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
@@ -1018,9 +1468,102 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  const outboundStockForm = event.target.closest('form[data-form="outbound"]');
+  if (outboundStockForm && event.target.name === "inventoryId") {
+    syncOutboundInventoryPrice(outboundStockForm);
+  }
+
+  const amountForm = event.target.closest('form[data-form="inbound"], form[data-form="production"], form[data-form="outbound"]');
+  if (amountForm && ["orderQty", "qty", "unitPrice", "paidAmount", "settlement"].includes(event.target.name)) {
+    syncQuantityAmount(amountForm);
+  }
+  if (amountForm?.dataset.form === "production" && ["status", "progress"].includes(event.target.name)) {
+    syncProductionStatusProgress(amountForm, event.target.name);
+  }
+  if (amountForm && ["orderQty", "qty"].includes(event.target.name)) {
+    formatQuantityInput(event.target);
+  }
+
   const input = event.target.closest('form[data-form="inbound"] input[name="processes"]');
-  if (!input) return;
-  syncInboundStandardSections();
+  if (input) {
+    syncInboundStandardSections();
+    return;
+  }
+
+  const machineImport = event.target.closest("[data-machine-import]");
+  if (machineImport) {
+    const file = machineImport.files?.[0];
+    if (!file) return;
+    if (!ensureCanEdit("machine")) {
+      machineImport.value = "";
+      return;
+    }
+    file
+      .text()
+      .then((text) => {
+        const records = parseMachineCsv(text);
+        if (!records.length) {
+          alert("没有识别到机台记录，请使用模板填写后再导入。");
+          return null;
+        }
+        if (isServerMode()) {
+          return importMachinesRemote(records, getAuthToken()).then((payload) => {
+            applyServerBootstrap(payload);
+            return records.length;
+          });
+        }
+        const result = mutateState((draft) => importMachines(draft, records));
+        if (result.ok === false) {
+          alert(result.message || "导入失败");
+          return null;
+        }
+        return records.length;
+      })
+      .then((count) => {
+        if (!count) return;
+        setUi({ machineVisibleLimit: 24 });
+        render();
+        alert(`已导入 ${count} 台机台。`);
+      })
+      .catch((error) => alert(error.message || "导入失败"))
+      .finally(() => {
+        machineImport.value = "";
+      });
+    return;
+  }
+
+  const machineFilter = event.target.closest("[data-machine-filter]");
+  if (machineFilter) {
+    updateMachineFiltersFromDom();
+    return;
+  }
+
+  const inboundFilter = event.target.closest("[data-filter]");
+  if (!inboundFilter) return;
+  updateInboundFiltersFromDom();
+});
+
+document.addEventListener("input", (event) => {
+  const amountForm = event.target.closest('form[data-form="inbound"], form[data-form="production"], form[data-form="outbound"]');
+  if (amountForm && ["orderQty", "qty", "unitPrice", "paidAmount"].includes(event.target.name)) {
+    syncQuantityAmount(amountForm);
+    if (amountForm.dataset.form === "production" && event.target.name === "qty") syncProductionStatusProgress(amountForm, event.target.name);
+    return;
+  }
+  if (amountForm?.dataset.form === "production" && event.target.name === "progress") {
+    syncProductionStatusProgress(amountForm, event.target.name);
+    return;
+  }
+
+  const machineFilter = event.target.closest("[data-machine-filter]");
+  if (machineFilter) {
+    updateMachineFiltersFromDom();
+    return;
+  }
+
+  const inboundFilter = event.target.closest("[data-filter]");
+  if (!inboundFilter) return;
+  updateInboundFiltersFromDom();
 });
 
 document.addEventListener("submit", (event) => {
@@ -1084,8 +1627,9 @@ document.addEventListener("submit", (event) => {
           date: formData.get("date"),
           customer: formData.get("customer"),
           orderNo: formData.get("orderNo"),
-          qty: Number(formData.get("qty") || 0),
-          unitPrice: Number(formData.get("unitPrice") || 0),
+          qty: formData.get("qty"),
+          unitPrice: formData.get("unitPrice"),
+          paidAmount: formData.get("paidAmount"),
           logistics: formData.get("logistics"),
           settlement: formData.get("settlement"),
           note: formData.get("note") || "",
@@ -1111,10 +1655,10 @@ document.addEventListener("submit", (event) => {
       .then((payload) => {
         applyServerBootstrap(payload);
         if (formKey === "inbound") clearUi(["inboundEditingId", "inboundFormOpen"]);
-        if (formKey === "inventory") clearUi(["inventoryEditingId"]);
-        if (formKey === "outbound") clearUi(["outboundEditingId"]);
-        if (formKey === "production") clearUi(["productionEditingId"]);
-        if (formKey === "finance") clearUi(["financeEditingId"]);
+        if (formKey === "inventory") clearUi(["inventoryEditingId", "inventoryFormOpen"]);
+        if (formKey === "outbound") clearUi(["outboundEditingId", "outboundFormOpen"]);
+        if (formKey === "production") clearUi(["productionEditingId", "productionFormOpen", "productionDraftInboundId"]);
+        if (formKey === "finance") clearUi(["financeEditingId", "financeFormOpen", "financeDraft"]);
         render();
       })
       .catch((error) => alert(error.message || "保存失败"));
@@ -1136,6 +1680,10 @@ document.addEventListener("submit", (event) => {
   }
 
   if (formKey === "inbound") clearUi(["inboundEditingId", "inboundFormOpen"]);
+  if (formKey === "inventory") clearUi(["inventoryEditingId", "inventoryFormOpen"]);
+  if (formKey === "outbound") clearUi(["outboundEditingId", "outboundFormOpen"]);
+  if (formKey === "production") clearUi(["productionEditingId", "productionFormOpen", "productionDraftInboundId"]);
+  if (formKey === "finance") clearUi(["financeEditingId", "financeFormOpen", "financeDraft"]);
   render();
 });
 

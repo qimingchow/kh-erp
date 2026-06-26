@@ -91,8 +91,16 @@ export async function deleteProductionRemote(id, token) {
   return request(`/api/production/${encodeURIComponent(id)}`, { method: "DELETE", token });
 }
 
+export async function stockInProductionRemote(id, token) {
+  return request(`/api/production/${encodeURIComponent(id)}/stock-in`, { method: "POST", token });
+}
+
 export async function updateMachineRemote(id, patch, token) {
   return request(`/api/machines/${encodeURIComponent(id)}`, { method: "PATCH", token, body: { patch } });
+}
+
+export async function importMachinesRemote(machines, token) {
+  return request("/api/machines/import", { method: "POST", token, body: { machines } });
 }
 
 export async function saveFinanceRemote(record, token) {

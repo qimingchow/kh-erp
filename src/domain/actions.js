@@ -1,8 +1,16 @@
-import { makeId, timestampNow, todayString } from "../lib/format.js";
+import { makeId, parseNumber, timestampNow, todayString } from "../lib/format.js";
 
 export function normalizeInventoryStatus(item) {
   if ((item.status || "") === "冻结") return "冻结";
   return item.qty <= item.safe ? "低库存" : "正常";
+}
+
+function productParts(value = "") {
+  const [item = "", ...rest] = String(value || "").split("/");
+  return {
+    item: item.trim() || String(value || "").trim() || "生产成品",
+    spec: rest.join("/").trim(),
+  };
 }
 
 function findInventoryForOutbound(state, record) {
@@ -42,6 +50,29 @@ function findFinanceForOutbound(state, record) {
   );
 }
 
+function normalizeSettlementAmounts(amount, settlement = "待收", paidValue = 0) {
+  const total = Number(amount || 0);
+  let nextSettlement = settlement || "待收";
+  let paidAmount = parseNumber(paidValue);
+
+  if (nextSettlement === "已收") {
+    paidAmount = total;
+  } else if (nextSettlement === "待收") {
+    paidAmount = 0;
+  } else if (nextSettlement === "部分收款") {
+    paidAmount = Math.max(0, Math.min(total, paidAmount));
+    if (paidAmount <= 0) nextSettlement = "待收";
+    if (total > 0 && paidAmount >= total) nextSettlement = "已收";
+  }
+
+  const remainingAmount = Math.max(0, total - paidAmount);
+  return {
+    settlement: nextSettlement,
+    paidAmount: Number(paidAmount.toFixed(2)),
+    remainingAmount: Number(remainingAmount.toFixed(2)),
+  };
+}
+
 function buildOutboundFinance(record, financeId) {
   return {
     id: financeId || makeId("fin"),
@@ -51,10 +82,29 @@ function buildOutboundFinance(record, financeId) {
     source: `出库单 ${record.orderNo}`,
     counterparty: record.customer,
     amount: record.amount,
+    paidAmount: record.paidAmount,
+    remainingAmount: record.remainingAmount,
     status: record.settlement,
     method: record.settlement === "已收" ? "转账" : "月结",
-    note: "由出库自动生成",
+    note: `由出库自动生成；数量 ${record.qty}${record.unit || ""}，单价 ${record.unitPrice}`,
   };
+}
+
+function normalizeProductionProgressStatus(status = "待排产", progress = 0) {
+  let nextStatus = status || "待排产";
+  let nextProgress = Math.max(0, Math.min(100, Number(progress || 0)));
+
+  if (nextStatus === "已完成" || nextProgress >= 100) {
+    nextStatus = "已完成";
+    nextProgress = 100;
+  } else if (nextProgress <= 0) {
+    nextStatus = "待排产";
+    nextProgress = 0;
+  } else if (nextStatus === "待排产") {
+    nextStatus = "进行中";
+  }
+
+  return { status: nextStatus, progress: nextProgress };
 }
 
 export function getMachineName(state, id) {
@@ -64,6 +114,9 @@ export function getMachineName(state, id) {
 export function inboundRecordFromForm(formData) {
   const id = String(formData.get("id") || "").trim();
   const orderDate = formData.get("orderDate") || todayString();
+  const orderQty = parseNumber(formData.get("orderQty"));
+  const unitPrice = parseNumber(formData.get("unitPrice"));
+  const manualAmount = parseNumber(formData.get("amount"));
   return {
     id: id || makeId("in"),
     customerName: formData.get("customerName"),
@@ -71,10 +124,10 @@ export function inboundRecordFromForm(formData) {
     orderDate,
     orderNo: formData.get("orderNo"),
     productSpec: formData.get("productSpec"),
-    orderQty: Number(formData.get("orderQty") || 0),
+    orderQty,
     unit: formData.get("unit") || "K",
-    unitPrice: formData.get("unitPrice") ? Number(formData.get("unitPrice")) : "",
-    amount: formData.get("amount") ? Number(formData.get("amount")) : "",
+    unitPrice: formData.get("unitPrice") ? unitPrice : "",
+    amount: formData.get("amount") ? manualAmount : unitPrice ? Number((orderQty * unitPrice).toFixed(2)) : "",
     deliveryDate: formData.get("deliveryDate"),
     note: formData.get("note") || "",
     processes: formData.getAll("processes"),
@@ -144,12 +197,12 @@ export function inventoryRecordFromForm(state, formData) {
     item: formData.get("item"),
     spec: formData.get("spec"),
     location: formData.get("location"),
-    qty: Number(formData.get("qty") || 0),
-    reserved: Number(formData.get("reserved") || 0),
-    safe: Number(formData.get("safe") || 0),
+    qty: parseNumber(formData.get("qty")),
+    reserved: parseNumber(formData.get("reserved")),
+    safe: parseNumber(formData.get("safe")),
     unit: formData.get("unit"),
     status: formData.get("status"),
-    cost: Number(formData.get("cost") || 0),
+    cost: parseNumber(formData.get("cost")),
     note: formData.get("note") || "",
     lastUpdate: todayString(),
   };
@@ -199,7 +252,7 @@ export function createOutbound(state, formData) {
   const stock = state.inventory.find((item) => item.id === inventoryId);
   if (!stock) return { ok: false, message: "请选择一个库存物料。" };
 
-  const qty = Number(formData.get("qty") || 0);
+  const qty = parseNumber(formData.get("qty"));
   const existing = id ? state.outbound.find((item) => item.id === id) : null;
   const previousStock = existing ? findInventoryForOutbound(state, existing) : null;
   if (existing && !previousStock) return { ok: false, message: "原出库关联库存不存在，无法自动回滚。" };
@@ -207,8 +260,9 @@ export function createOutbound(state, formData) {
   const availableQty = Number(stock.qty || 0) + (previousStock?.id === stock.id ? Number(existing.qty || 0) : 0);
   if (!qty || qty > availableQty) return { ok: false, message: "出库数量不能大于可用库存。" };
 
-  const unitPrice = Number(formData.get("unitPrice") || 0);
+  const unitPrice = parseNumber(formData.get("unitPrice"));
   const amount = Number((qty * unitPrice).toFixed(2));
+  const settlementAmounts = normalizeSettlementAmounts(amount, formData.get("settlement"), formData.get("paidAmount"));
   const record = {
     id: existing?.id || makeId("out"),
     inventoryId,
@@ -222,9 +276,11 @@ export function createOutbound(state, formData) {
     unit: stock.unit,
     unitPrice,
     amount,
+    paidAmount: settlementAmounts.paidAmount,
+    remainingAmount: settlementAmounts.remainingAmount,
     warehouse: stock.location,
     logistics: formData.get("logistics"),
-    settlement: formData.get("settlement"),
+    settlement: settlementAmounts.settlement,
     note: formData.get("note") || "",
     updatedAt: timestampNow(),
   };
@@ -303,6 +359,11 @@ export function createProduction(state, formData) {
   const id = String(formData.get("id") || "").trim();
   const record = productionRecordFromForm(formData, id);
   const existing = id ? state.production.find((item) => item.id === id) : null;
+  if (existing) {
+    record.inventoryId = existing.inventoryId || record.inventoryId;
+    record.stockedQty = Number(existing.stockedQty || record.stockedQty || 0);
+    record.stockedAt = existing.stockedAt || record.stockedAt;
+  }
 
   if (existing) {
     Object.assign(existing, record);
@@ -319,20 +380,80 @@ export function createProduction(state, formData) {
 }
 
 export function productionRecordFromForm(formData, existingId = "") {
+  const qty = parseNumber(formData.get("qty"));
+  const unitPrice = parseNumber(formData.get("unitPrice"));
+  const manualAmount = parseNumber(formData.get("amount"));
+  const progressStatus = normalizeProductionProgressStatus(formData.get("status"), formData.get("progress"));
   return {
     id: existingId || String(formData.get("id") || "").trim() || makeId("plan"),
     planNo: formData.get("planNo"),
     orderNo: formData.get("orderNo"),
     item: formData.get("item"),
-    qty: Number(formData.get("qty") || 0),
+    qty,
+    unit: formData.get("unit") || "K",
+    unitPrice: formData.get("unitPrice") ? unitPrice : "",
+    amount: formData.get("amount") ? manualAmount : unitPrice ? Number((qty * unitPrice).toFixed(2)) : "",
     dueDate: formData.get("dueDate"),
     machineId: formData.get("machineId"),
     priority: formData.get("priority"),
-    status: formData.get("status"),
-    progress: Number(formData.get("progress") || 0),
+    status: progressStatus.status,
+    progress: progressStatus.progress,
     note: formData.get("note") || "",
+    inventoryId: formData.get("inventoryId") || "",
+    stockedQty: Number(formData.get("stockedQty") || 0),
+    stockedAt: formData.get("stockedAt") || "",
     updatedAt: timestampNow(),
   };
+}
+
+export function productionToInventory(state, planId) {
+  const plan = state.production.find((item) => item.id === planId);
+  if (!plan) return { ok: false, message: "生产计划不存在。" };
+  if (plan.inventoryId) return { ok: false, message: "该生产计划已经转入库存，不能重复入库。" };
+  if (plan.status !== "已完成" || Number(plan.progress || 0) < 100) {
+    return { ok: false, message: "请先将生产计划状态改为已完成，且进度为 100%。" };
+  }
+
+  const { item, spec } = productParts(plan.item);
+  const existing = state.inventory.find(
+    (stock) => stock.item === item && stock.spec === spec && String(stock.note || "").includes(plan.planNo),
+  );
+  const stockedAt = todayString();
+  const qty = Number(plan.qty || 0);
+  const stock = existing || {
+    id: makeId("stock"),
+    code: `FG-${String(state.inventory.length + 1).padStart(3, "0")}`,
+    item,
+    spec,
+    location: "成品仓-待定",
+    qty: 0,
+    reserved: 0,
+    safe: 0,
+    unit: plan.unit || "K",
+    status: "正常",
+    cost: Number(plan.unitPrice || 0),
+    note: `由生产计划 ${plan.planNo} 入库，订单 ${plan.orderNo || "-"}`,
+    lastUpdate: stockedAt,
+  };
+
+  stock.qty = Number(stock.qty || 0) + qty;
+  stock.lastUpdate = stockedAt;
+  stock.status = normalizeInventoryStatus(stock);
+  if (!existing) state.inventory.unshift(stock);
+
+  Object.assign(plan, {
+    inventoryId: stock.id,
+    stockedQty: qty,
+    stockedAt,
+    updatedAt: timestampNow(),
+  });
+  state.ui = {
+    ...(state.ui || {}),
+    inventoryViewingId: stock.id,
+    productionViewingId: plan.id,
+  };
+
+  return { ok: true, id: stock.id };
 }
 
 export function deleteProduction(state, id) {
@@ -355,14 +476,29 @@ export function deleteProduction(state, id) {
 }
 
 export function financeRecordFromForm(formData, existingId = "") {
+  const type = formData.get("type");
+  const amount = parseNumber(formData.get("amount"));
+  const status = formData.get("status");
+  const paidInfo = normalizeSettlementAmounts(
+    amount,
+    status === "已付" ? "已收" : status === "待付" ? "待收" : status,
+    formData.get("paidAmount"),
+  );
+  const paidAmount = type === "付款" || status === "已付" ? amount : type === "应付" && status === "待付" ? 0 : paidInfo.paidAmount;
+  const remainingAmount = Math.max(0, amount - paidAmount);
+  const normalizedStatus = type === "应收" ? paidInfo.settlement : status;
+
   return {
     id: existingId || String(formData.get("id") || "").trim() || makeId("fin"),
+    outboundId: formData.get("outboundId") || "",
     date: formData.get("date"),
-    type: formData.get("type"),
+    type,
     source: formData.get("source"),
     counterparty: formData.get("counterparty"),
-    amount: Number(formData.get("amount") || 0),
-    status: formData.get("status"),
+    amount,
+    paidAmount: Number(paidAmount.toFixed(2)),
+    remainingAmount: Number(remainingAmount.toFixed(2)),
+    status: normalizedStatus,
     method: formData.get("method"),
     note: formData.get("note") || "",
     updatedAt: timestampNow(),
@@ -382,7 +518,14 @@ export function createFinance(state, formData) {
 
   if (record.outboundId) {
     const outbound = state.outbound.find((item) => item.id === record.outboundId);
-    if (outbound) outbound.settlement = record.status;
+    if (outbound) {
+      const settlementStatus =
+        record.status === "已收" ? "已收" : record.status === "部分收款" ? "部分收款" : "待收";
+      const settlementAmounts = normalizeSettlementAmounts(outbound.amount, settlementStatus, record.paidAmount);
+      outbound.settlement = settlementAmounts.settlement;
+      outbound.paidAmount = settlementAmounts.paidAmount;
+      outbound.remainingAmount = settlementAmounts.remainingAmount;
+    }
   }
 
   state.ui = {
@@ -402,6 +545,8 @@ export function deleteFinance(state, id) {
     if (outbound) {
       outbound.financeId = "";
       outbound.settlement = "待收";
+      outbound.paidAmount = 0;
+      outbound.remainingAmount = Number(outbound.amount || 0);
     }
   }
   state.finance.splice(index, 1);
@@ -424,4 +569,40 @@ export function updateMachine(state, machineId, patch) {
   }
 
   return { ok: true };
+}
+
+function normalizeMachineImportRecord(record, index = 0) {
+  const type = record.type === "测试机" ? "测试机" : "分选机";
+  const fallbackPrefix = type === "测试机" ? "T" : "S";
+  const fallbackNo = String(index + 1).padStart(3, "0");
+  return {
+    id: String(record.id || `${type === "测试机" ? "test" : "sorter"}-${fallbackNo}`).trim(),
+    type,
+    name: String(record.name || `${type} ${fallbackPrefix}-${fallbackNo}`).trim(),
+    area: String(record.area || (type === "测试机" ? "测试区" : "分选区")).trim(),
+    status: ["运行", "待机", "维护", "故障", "异常"].includes(record.status) ? record.status : "待机",
+    job: String(record.job || "等待排产").trim(),
+    operator: String(record.operator || "").trim(),
+    shift: String(record.shift || "").trim(),
+    progress: Math.max(0, Math.min(100, Number(record.progress || 0))),
+    updatedAt: String(record.updatedAt || new Date().toISOString().slice(0, 10)).trim(),
+  };
+}
+
+export function importMachines(state, records = []) {
+  if (!Array.isArray(records) || !records.length) {
+    return { ok: false, message: "没有可导入的机台记录。" };
+  }
+
+  records.forEach((item, index) => {
+    const record = normalizeMachineImportRecord(item, index);
+    const existingIndex = state.machines.findIndex((machine) => machine.id === record.id);
+    if (existingIndex >= 0) {
+      state.machines[existingIndex] = { ...state.machines[existingIndex], ...record };
+    } else {
+      state.machines.push(record);
+    }
+  });
+
+  return { ok: true, count: records.length };
 }
