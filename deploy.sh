@@ -29,12 +29,28 @@ echo "3. Updating code from GitHub..."
 git fetch origin "$APP_BRANCH"
 git checkout "$APP_BRANCH"
 git pull --ff-only origin "$APP_BRANCH"
+current_commit="$(git rev-parse --short HEAD)"
+echo "   Current commit: $current_commit"
 
 echo "4. Restarting service..."
-node_pids="$(ps -eo pid=,comm=,args= | awk '$2 ~ /^(node|nodejs)$/ && $0 ~ /server\/server\.js/ {print $1}' || true)"
+find_node_pids() {
+  ps -eo pid=,comm=,args= | awk '$2 ~ /^(node|nodejs)$/ && $0 ~ /server\/server\.js/ {print $1}' || true
+}
+
+node_pids="$(find_node_pids)"
 if [[ -n "$node_pids" ]]; then
+  echo "   Stopping old process(es): $node_pids"
   kill $node_pids || true
-  sleep 1
+  for _ in $(seq 1 20); do
+    sleep 0.2
+    node_pids="$(find_node_pids)"
+    [[ -z "$node_pids" ]] && break
+  done
+  if [[ -n "$node_pids" ]]; then
+    echo "   Force stopping old process(es): $node_pids"
+    kill -9 $node_pids || true
+    sleep 0.5
+  fi
 fi
 
 nohup env HOST="$APP_HOST" PORT="$APP_PORT" npm run start > "$APP_LOG" 2>&1 &
