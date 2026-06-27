@@ -495,8 +495,19 @@ export function renderInbound(state, auth) {
 
   return `
     <div class="page-stack">
-      <section class="module-toolbar">
-        <div class="filter-bar">
+      <section class="query-panel inbound-query-panel">
+        <div class="query-panel-header">
+          <div>
+            <h3>筛选查询</h3>
+            <p>按客户、日期、状态和关键词快速定位来料单据。</p>
+          </div>
+          <div class="stats-card compact-stat inbound-stat">
+            <span>本月来料</span>
+            <strong>${formatNumber(inboundQty)}</strong>
+            <small>较上月 ↑ 12.5%</small>
+          </div>
+        </div>
+        <div class="query-grid">
           <label class="filter-field">
             <span>客户</span>
             <select data-filter="inbound-customer">
@@ -525,12 +536,9 @@ export function renderInbound(state, auth) {
             <span>搜索订单、品名、备注</span>
             <input data-filter="inbound-keyword" type="search" value="${escapeHtml(filters.keyword || "")}" placeholder="请输入关键词" />
           </label>
-          <button class="btn ghost" type="button" data-action="inbound-filter-reset">重置</button>
-        </div>
-        <div class="stats-card inbound-stat">
-          <span>本月来料</span>
-          <strong>${formatNumber(inboundQty)}</strong>
-          <small>较上月 ↑ 12.5%</small>
+          <div class="query-actions">
+            <button class="btn ghost" type="button" data-action="inbound-filter-reset">重置</button>
+          </div>
         </div>
       </section>
 

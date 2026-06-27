@@ -115,13 +115,13 @@ export function renderMachine(state, auth = {}) {
 
   return `
     <div class="content-grid">
-      <section class="panel">
-        <div class="panel-header">
+      <section class="panel machine-main-panel">
+        <div class="panel-header machine-panel-header">
           <div>
             <h3>机台看板</h3>
             <p>按分选机和测试机管理设备，支持批量导入、导出、模板维护和快速查找。</p>
           </div>
-          <div class="module-header-actions">
+          <div class="module-header-actions machine-header-actions">
             <button class="btn" type="button" data-action="machine-export"><span class="icon">${icon("download")}</span>导出机台</button>
             <button class="btn" type="button" data-action="machine-template"><span class="icon">${icon("download")}</span>下载模板</button>
             ${
@@ -134,33 +134,35 @@ export function renderMachine(state, auth = {}) {
                 `
                 : ""
             }
+          </div>
+        </div>
+        <div class="machine-control-card">
             <div class="module-stat">
               <span>运行机台</span>
               <strong>${formatNumber(runningMachines)}</strong>
               <span>显示 ${formatNumber(filteredMachines.length)} / 共 ${formatNumber(state.machines.length)} 台</span>
             </div>
+          <div class="filter-bar compact machine-filter-bar">
+            <label class="filter-field">
+              <span>快速查找</span>
+              <input type="search" data-machine-filter="keyword" placeholder="机台编号、名称、区域、人员、任务" value="${escapeHtml(filters.keyword || "")}" />
+            </label>
+            <label class="filter-field">
+              <span>机台类型</span>
+              <select data-machine-filter="type">
+                <option value="">全部类型</option>
+                ${MACHINE_TYPES.map((type) => `<option value="${escapeHtml(type)}" ${filters.type === type ? "selected" : ""}>${escapeHtml(type)}</option>`).join("")}
+              </select>
+            </label>
+            <label class="filter-field">
+              <span>状态</span>
+              <select data-machine-filter="status">
+                <option value="">全部状态</option>
+                ${["运行", "待机", "维护", "故障"].map((status) => `<option value="${escapeHtml(status)}" ${filters.status === status ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}
+              </select>
+            </label>
+            <button class="btn ghost" type="button" data-action="machine-filter-reset">重置</button>
           </div>
-        </div>
-        <div class="filter-bar compact machine-filter-bar">
-          <label class="filter-field">
-            <span>快速查找</span>
-            <input type="search" data-machine-filter="keyword" placeholder="机台编号、名称、区域、人员、任务" value="${escapeHtml(filters.keyword || "")}" />
-          </label>
-          <label class="filter-field">
-            <span>机台类型</span>
-            <select data-machine-filter="type">
-              <option value="">全部类型</option>
-              ${MACHINE_TYPES.map((type) => `<option value="${escapeHtml(type)}" ${filters.type === type ? "selected" : ""}>${escapeHtml(type)}</option>`).join("")}
-            </select>
-          </label>
-          <label class="filter-field">
-            <span>状态</span>
-            <select data-machine-filter="status">
-              <option value="">全部状态</option>
-              ${["运行", "待机", "维护", "故障"].map((status) => `<option value="${escapeHtml(status)}" ${filters.status === status ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}
-            </select>
-          </label>
-          <button class="btn ghost" type="button" data-action="machine-filter-reset">重置</button>
         </div>
         <div class="machine-status-grid">
           <div class="machine-status-card running">

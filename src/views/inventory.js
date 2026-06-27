@@ -107,8 +107,19 @@ export function renderInventory(state, auth = {}) {
 
   return `
     <div class="page-stack">
-      <section class="module-toolbar">
-        <div class="filter-bar">
+      <section class="query-panel">
+        <div class="query-panel-header">
+          <div>
+            <h3>筛选查询</h3>
+            <p>按编码、名称、型号和状态筛选库存物料。</p>
+          </div>
+          <div class="stats-card compact-stat inventory-stat">
+            <span>库存物料</span>
+            <strong>${formatNumber(stockQty)}</strong>
+            <small>共 ${state.inventory.length} 类物料</small>
+          </div>
+        </div>
+        <div class="query-grid inventory-query-grid">
           <label class="filter-field">
             <span>物料编码</span>
             <input type="search" placeholder="请输入编码" />
@@ -130,13 +141,10 @@ export function renderInventory(state, auth = {}) {
               <option>冻结</option>
             </select>
           </label>
-          <button class="btn ghost" type="button">重置</button>
-          <button class="btn primary" type="button">查询</button>
-        </div>
-        <div class="stats-card inventory-stat">
-          <span>库存物料</span>
-          <strong>${formatNumber(stockQty)}</strong>
-          <small>共 ${state.inventory.length} 类物料</small>
+          <div class="query-actions">
+            <button class="btn ghost" type="button">重置</button>
+            <button class="btn primary" type="button">查询</button>
+          </div>
         </div>
       </section>
 
