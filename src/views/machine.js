@@ -1,4 +1,4 @@
-import { badge } from "../ui/components.js";
+import { badge, renderTable } from "../ui/components.js";
 import { icon } from "../lib/icons.js";
 import { escapeHtml, formatNumber } from "../lib/format.js";
 import { MACHINE_TYPES } from "../data/seed.js";
@@ -15,15 +15,22 @@ function groupMachines(machines) {
   return grouped;
 }
 
+function machineGroupName(machine = {}) {
+  return machine.group || machine.productionGroup || machine.area || "未分组";
+}
+
 function matchesMachineFilters(machine, filters = {}) {
   const keyword = String(filters.keyword || "").trim().toLowerCase();
   const type = String(filters.type || "");
   const status = String(filters.status || "");
+  const group = String(filters.group || "");
   const haystack = [
     machine.id,
     machine.type,
     machine.name,
     machine.area,
+    machine.group,
+    machine.productionGroup,
     machine.status,
     machine.job,
     machine.operator,
@@ -35,6 +42,7 @@ function matchesMachineFilters(machine, filters = {}) {
   if (keyword && !haystack.includes(keyword)) return false;
   if (type && machine.type !== type) return false;
   if (status && machine.status !== status) return false;
+  if (group && machineGroupName(machine) !== group) return false;
   return true;
 }
 
@@ -52,6 +60,7 @@ export function renderMachine(state, auth = {}) {
   const maintenanceMachines = filteredMachines.filter((item) => item.status === "维护").length;
   const errorMachines = filteredMachines.filter((item) => item.status === "故障" || item.status === "异常").length;
   const statusTotal = filteredMachines.length || 0;
+  const machineGroups = [...new Set(state.machines.map((machine) => machineGroupName(machine)).filter(Boolean))];
   const statusClass = (status) => {
     if (status === "运行") return "running";
     if (status === "待机") return "standby";
@@ -98,7 +107,7 @@ export function renderMachine(state, auth = {}) {
                         <button type="button" data-action="machine-status" data-machine="${escapeHtml(machine.id)}" data-status="维护">维护</button>
                         <button type="button" data-action="machine-step" data-machine="${escapeHtml(machine.id)}" data-step="10">+10%</button>
                         <button type="button" data-action="machine-step" data-machine="${escapeHtml(machine.id)}" data-step="-10">-10%</button>
-                        <button type="button" data-action="machine-complete" data-machine="${escapeHtml(machine.id)}">完成</button>
+                        <button type="button" data-action="machine-delete" data-machine="${escapeHtml(machine.id)}">删除</button>
                       </div>
                     ` : ""}
                   </div>
@@ -110,6 +119,41 @@ export function renderMachine(state, auth = {}) {
       `;
     })
     .join("");
+
+  const machineColumns = [
+    {
+      label: "机台",
+      render: (row) => `
+        <strong>${escapeHtml(row.name)}</strong>
+        <div class="small">${escapeHtml(row.id)} · ${escapeHtml(row.type || "-")}</div>
+      `,
+    },
+    { label: "生产组", render: (row) => escapeHtml(machineGroupName(row)) },
+    { label: "区域 / 班次", render: (row) => `${escapeHtml(row.area || "-")}<div class="small">${escapeHtml(row.operator || "-")} · ${escapeHtml(row.shift || "-")}</div>` },
+    { label: "状态", render: (row) => badge(row.status) },
+    { label: "当前任务", render: (row) => escapeHtml(row.job || "等待排产") },
+    {
+      label: "进度",
+      render: (row) => `
+        <div class="inline-progress"><span style="width:${Math.max(0, Math.min(100, Number(row.progress || 0)))}%"></span></div>
+        <div class="small">${formatNumber(row.progress)}% · ${escapeHtml(row.updatedAt || "-")}</div>
+      `,
+    },
+    {
+      label: "操作",
+      render: (row) =>
+        editable
+          ? `
+            <div class="row-actions">
+              <button class="btn mini" type="button" data-action="machine-status" data-machine="${escapeHtml(row.id)}" data-status="运行">运行</button>
+              <button class="btn mini" type="button" data-action="machine-status" data-machine="${escapeHtml(row.id)}" data-status="待机">待机</button>
+              <button class="btn mini" type="button" data-action="machine-status" data-machine="${escapeHtml(row.id)}" data-status="维护">维护</button>
+              <button class="btn mini danger" type="button" data-action="machine-delete" data-machine="${escapeHtml(row.id)}">删除</button>
+            </div>
+          `
+          : `<span class="small">只读</span>`,
+    },
+  ];
 
   const activePlans = state.production.filter((item) => item.status === "进行中");
 
@@ -161,8 +205,21 @@ export function renderMachine(state, auth = {}) {
                 ${["运行", "待机", "维护", "故障"].map((status) => `<option value="${escapeHtml(status)}" ${filters.status === status ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}
               </select>
             </label>
+            <label class="filter-field">
+              <span>生产组</span>
+              <select data-machine-filter="group">
+                <option value="">全部生产组</option>
+                ${machineGroups.map((group) => `<option value="${escapeHtml(group)}" ${filters.group === group ? "selected" : ""}>${escapeHtml(group)}</option>`).join("")}
+              </select>
+            </label>
             <button class="btn ghost" type="button" data-action="machine-filter-reset">重置</button>
           </div>
+        </div>
+        <div class="machine-group-strip">
+          <button class="${!filters.group ? "active" : ""}" type="button" data-action="machine-group-filter" data-group="">全部生产组</button>
+          ${machineGroups.slice(0, 10).map((group) => `
+            <button class="${filters.group === group ? "active" : ""}" type="button" data-action="machine-group-filter" data-group="${escapeHtml(group)}">${escapeHtml(group)}</button>
+          `).join("")}
         </div>
         <div class="machine-status-grid">
           <div class="machine-status-card running">
@@ -198,10 +255,23 @@ export function renderMachine(state, auth = {}) {
             </div>
           </div>
         </div>
+        <section class="machine-list-panel">
+          <div class="panel-header">
+            <div>
+              <h3>机台列表</h3>
+              <p>机台数量较多时以列表为主，可按类型、状态、生产组和关键词快速定位。</p>
+            </div>
+            <div class="small">显示 ${formatNumber(visibleMachines.length)} / ${formatNumber(filteredMachines.length)} 台</div>
+          </div>
+          ${renderTable(machineColumns, visibleMachines)}
+        </section>
+        <details class="machine-card-preview">
+          <summary>查看卡片预览</summary>
         ${
           machineGrid ||
           `<div class="empty">没有找到匹配的机台。可以重置筛选，或按模板批量导入分选机、测试机信息。</div>`
         }
+        </details>
         ${
           filteredMachines.length > visibleMachines.length
             ? `

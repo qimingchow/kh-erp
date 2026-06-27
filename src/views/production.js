@@ -4,8 +4,13 @@ import { escapeHtml, formatCurrency, formatDate, formatNumber } from "../lib/for
 import { getMachineName } from "../domain/actions.js";
 import { canEdit } from "../lib/state.js";
 
-function defaultProductionValues(record = {}, draftInbound = null) {
+function machineGroupName(machine = {}) {
+  return machine.group || machine.productionGroup || machine.area || "未分组";
+}
+
+function defaultProductionValues(record = {}, draftInbound = null, state = { machines: [] }) {
   const current = record || {};
+  const currentMachine = state.machines.find((machine) => machine.id === current.machineId);
   const draftPlanNo = draftInbound
     ? `PL-${String(draftInbound.orderDate || draftInbound.date || new Date().toISOString().slice(0, 10)).replaceAll("-", "")}-${String((draftInbound.id || "").split("-").pop() || "001").padStart(3, "0")}`
     : "";
@@ -18,7 +23,9 @@ function defaultProductionValues(record = {}, draftInbound = null) {
     unit: current.unit || draftInbound?.unit || "K",
     unitPrice: current.unitPrice ?? draftInbound?.unitPrice ?? "",
     amount: current.amount ?? draftInbound?.amount ?? "",
+    startDate: current.startDate || draftInbound?.orderDate || draftInbound?.date || new Date().toISOString().slice(0, 10),
     dueDate: current.dueDate || draftInbound?.deliveryDate || new Date().toISOString().slice(0, 10),
+    machineGroup: current.machineGroup || (currentMachine ? machineGroupName(currentMachine) : ""),
     machineId: current.machineId || "",
     priority: current.priority || "标准",
     status: current.status || "待排产",
@@ -39,7 +46,8 @@ export function renderProduction(state, auth = {}) {
       : null;
   const selectedRecord =
     state.production.find((item) => item.id === state.ui?.productionViewingId) || formRecord || state.production[0] || null;
-  const values = defaultProductionValues(formRecord, draftInbound);
+  const values = defaultProductionValues(formRecord, draftInbound, state);
+  const viewMode = state.ui?.productionViewMode === "gantt" ? "gantt" : "list";
   const pendingPlans = state.production.filter((item) => item.status !== "已完成").length;
   const runningPlans = state.production.filter((item) => item.status === "进行中").length;
   const completedPlans = state.production.filter((item) => item.status === "已完成").length;
@@ -50,6 +58,11 @@ export function renderProduction(state, auth = {}) {
     value: item.id,
     label: `${item.type} · ${item.name} · ${item.area} · ${item.status}`,
   }));
+  const machineGroups = [...new Set(state.machines.map((machine) => machineGroupName(machine)).filter(Boolean))];
+  const machineGroupOptions = [
+    { label: "未分组", value: "" },
+    ...machineGroups.map((group) => ({ label: group, value: group })),
+  ];
   const ganttWindow = createGanttWindow(state, selectedRecord);
 
   const fields = [
@@ -60,7 +73,16 @@ export function renderProduction(state, auth = {}) {
     { name: "unit", label: "单位", placeholder: "K / KK / PCS / 批" },
     { name: "unitPrice", label: "单价", type: "number", min: 0, step: 0.01, defaultValue: "", required: false },
     { name: "amount", label: "金额", type: "number", min: 0, step: 0.01, defaultValue: "", required: false },
+    { name: "startDate", label: "计划开始", type: "date", defaultValue: new Date().toISOString().slice(0, 10) },
     { name: "dueDate", label: "交期", type: "date", defaultValue: new Date().toISOString().slice(0, 10) },
+    {
+      name: "machineGroup",
+      label: "生产组",
+      type: "select",
+      options: machineGroupOptions,
+      defaultValue: "",
+      required: false,
+    },
     {
       name: "machineId",
       label: "机台",
@@ -99,7 +121,8 @@ export function renderProduction(state, auth = {}) {
     { label: "计划号", render: (row) => escapeHtml(row.planNo) },
     { label: "订单", render: (row) => escapeHtml(row.orderNo) },
     { label: "物料", render: (row) => `${escapeHtml(row.item)}<div class="small">${formatNumber(row.qty)} ${escapeHtml(row.unit || "K")}</div>` },
-    { label: "机台", render: (row) => escapeHtml(getMachineName(state, row.machineId)) },
+    { label: "生产组 / 机台", render: (row) => `${escapeHtml(row.machineGroup || "-")}<div class="small">${escapeHtml(getMachineName(state, row.machineId))}</div>` },
+    { label: "计划开始", render: (row) => escapeHtml(formatDate(row.startDate)) },
     { label: "交期", render: (row) => escapeHtml(formatDate(row.dueDate)) },
     { label: "优先级", render: (row) => `<span class="priority-pill ${priorityClass(row.priority)}">${escapeHtml(priorityLabel(row.priority))}</span>` },
     { label: "状态", render: (row) => badge(row.status) },
@@ -158,8 +181,8 @@ export function renderProduction(state, auth = {}) {
           </div>
         </div>
         <div class="view-tabs">
-          <button class="active" type="button">列表视图</button>
-          <button type="button">甘特图视图</button>
+          <button class="${viewMode === "list" ? "active" : ""}" type="button" data-action="production-view-mode" data-mode="list">列表视图</button>
+          <button class="${viewMode === "gantt" ? "active" : ""}" type="button" data-action="production-view-mode" data-mode="gantt">甘特图视图</button>
         </div>
         <div class="filter-bar compact">
           <label class="filter-field"><span>日期范围</span><input type="text" value="2026-06-01 ~ 2026-06-30" /></label>
@@ -171,17 +194,19 @@ export function renderProduction(state, auth = {}) {
           <button class="btn primary" type="button">筛选</button>
         </div>
         ${!editable ? `<div class="empty">当前账号没有生产计划维护权限，可查看排产数据。</div>` : ""}
-        <div class="split-workbench">
-          <div>${renderTable(columns, state.production)}</div>
-          <div class="gantt-panel">
+        ${
+          viewMode === "list"
+            ? `<div class="production-view-content">${renderTable(columns, state.production)}</div>`
+            : `
+          <div class="gantt-panel gantt-panel-wide">
             <div class="gantt-head">
               <button class="btn mini" type="button">今天</button>
               <strong>${escapeHtml(ganttWindow.label)}</strong>
               <div class="segmented-control"><span>日</span><span class="active">周</span><span>月</span></div>
             </div>
             ${renderGantt(state, ganttWindow)}
-          </div>
-        </div>
+          </div>`
+        }
       </section>
 
       ${selectedRecord ? renderProductionDetail(selectedRecord, state, editable) : ""}
@@ -304,7 +329,9 @@ function renderProductionDetail(plan, state, editable) {
         ${detailItem("关联订单", plan.orderNo || "-")}
         ${detailItem("生产物料", plan.item)}
         ${detailItem("计划数量", `${formatNumber(plan.qty)} ${plan.unit || "K"}`)}
+        ${detailItem("生产组", plan.machineGroup || "-")}
         ${detailItem("机台", getMachineName(state, plan.machineId))}
+        ${detailItem("计划开始", formatDate(plan.startDate))}
         ${detailItem("交期", formatDate(plan.dueDate))}
         ${detailItem("优先级", priorityLabel(plan.priority))}
         ${detailItem("状态 / 进度", `${plan.status} · ${formatNumber(plan.progress)}%`)}
@@ -362,10 +389,12 @@ function formatShortDate(date) {
 }
 
 function createGanttWindow(state, selectedRecord) {
-  const dueDates = state.production.map((plan) => parseScheduleDate(plan.dueDate)).filter(Boolean);
-  dueDates.sort((a, b) => a.getTime() - b.getTime());
-  const anchor = parseScheduleDate(selectedRecord?.dueDate) || dueDates[0] || new Date();
-  const start = addDays(anchor, -3);
+  const dates = state.production
+    .flatMap((plan) => [parseScheduleDate(plan.startDate), parseScheduleDate(plan.dueDate)])
+    .filter(Boolean);
+  dates.sort((a, b) => a.getTime() - b.getTime());
+  const anchor = parseScheduleDate(selectedRecord?.startDate) || dates[0] || new Date();
+  const start = addDays(anchor, -1);
   const days = Array.from({ length: 7 }, (_, index) => addDays(start, index));
   return {
     days,
@@ -391,10 +420,10 @@ function renderGantt(state, schedule) {
         ${days.map((day) => `<span>${escapeHtml(formatShortDate(day))}</span>`).join("")}
       </div>
       ${state.production.map((plan, index) => {
-        const dueDate = parseScheduleDate(plan.dueDate) || days[0];
-        const inferredStart = addDays(dueDate, plan.status === "已完成" ? -2 : Number(plan.progress || 0) > 0 ? -1 : 0);
-        const startIndex = Math.max(0, Math.min(6, scheduleColumn(schedule, dateKey(inferredStart))));
-        const endIndex = Math.max(startIndex, Math.min(6, scheduleColumn(schedule, plan.dueDate)));
+        const startDate = parseScheduleDate(plan.startDate) || parseScheduleDate(plan.dueDate) || days[0];
+        const dueDate = parseScheduleDate(plan.dueDate) || startDate;
+        const startIndex = Math.max(0, Math.min(6, scheduleColumn(schedule, dateKey(startDate))));
+        const endIndex = Math.max(startIndex, Math.min(6, scheduleColumn(schedule, dateKey(dueDate))));
         const start = startIndex + 2;
         const width = Math.max(1, endIndex - startIndex + 1);
         const className = plan.status === "已完成" ? "done" : plan.status === "进行中" ? "active" : "pending";

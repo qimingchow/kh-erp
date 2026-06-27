@@ -1,19 +1,16 @@
 import { badge } from "../ui/components.js";
 import { icon } from "../lib/icons.js";
 import { escapeHtml, formatCurrency, formatDate, formatNumber } from "../lib/format.js";
+import { getPendingInboundRecords } from "../domain/actions.js";
 
 export function renderOverview(state) {
+  const pendingInbound = getPendingInboundRecords(state);
+  const pendingPlans = state.production.filter((item) => item.status !== "已完成");
   const flowItems = [
-    { step: "来料录入", title: "来料录入", count: state.inbound.length, icon: "inbox", tone: "blue" },
+    { step: "待转生产", title: "来料录入", count: pendingInbound.length, icon: "inbox", tone: "blue" },
     { step: "销售/客户", title: "出库记录", count: state.outbound.length, icon: "truck", tone: "purple" },
     { step: "生产计划", title: "生产计划", count: state.production.length, icon: "calendar", tone: "orange" },
-    {
-      step: "财务执行",
-      title: "财务记录",
-      count: state.finance.filter((item) => item.status !== "已收" && item.status !== "已付").length,
-      icon: "landmark",
-      tone: "blue",
-    },
+    { step: "财务执行", title: "财务记录", count: state.finance.length, icon: "landmark", tone: "blue" },
   ];
 
   const recent = [
@@ -51,7 +48,7 @@ export function renderOverview(state) {
         <div class="panel-header">
           <div>
             <h3>业务数据总览</h3>
-            <p>核心业务流程数据概览，按模块汇总今日记录、趋势和状态。</p>
+              <p>核心业务流程数据概览，按当前待办、已流转单据和财务记录汇总。</p>
           </div>
           <button class="btn ghost" type="button">今日</button>
         </div>
@@ -115,8 +112,8 @@ export function renderOverview(state) {
           <div class="overview-metric">
             <span class="module-icon blue">${icon("chart")}</span>
             <div>
-              <strong>${formatNumber(state.production.filter((item) => item.status !== "已完成").length)}</strong>
-              <span>周转天数</span>
+              <strong>${formatNumber(pendingPlans.length)}</strong>
+              <span>在制计划</span>
             </div>
           </div>
         </div>

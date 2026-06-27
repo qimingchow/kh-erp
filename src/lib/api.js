@@ -99,6 +99,10 @@ export async function updateMachineRemote(id, patch, token) {
   return request(`/api/machines/${encodeURIComponent(id)}`, { method: "PATCH", token, body: { patch } });
 }
 
+export async function deleteMachineRemote(id, token) {
+  return request(`/api/machines/${encodeURIComponent(id)}`, { method: "DELETE", token });
+}
+
 export async function importMachinesRemote(machines, token) {
   return request("/api/machines/import", { method: "POST", token, body: { machines } });
 }

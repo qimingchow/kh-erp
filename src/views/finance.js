@@ -1,6 +1,6 @@
 import { badge, renderField, renderTable } from "../ui/components.js";
 import { icon } from "../lib/icons.js";
-import { escapeHtml, formatCurrency, formatDate, formatNumber } from "../lib/format.js";
+import { escapeHtml, formatCompactCurrency, formatCurrency, formatDate, formatNumber } from "../lib/format.js";
 import { canEdit } from "../lib/state.js";
 
 function defaultFinanceValues(record = {}) {
@@ -130,7 +130,7 @@ export function renderFinance(state, auth = {}) {
             ${editable ? `<button class="btn primary" type="button" data-action="finance-new"><span class="icon">${icon("plus")}</span>新增记录</button>` : ""}
             <div class="module-stat">
               <span>待收账款</span>
-              <strong>${formatCurrency(pendingReceivable)}</strong>
+              <strong>${formatCompactCurrency(pendingReceivable)}</strong>
               <span>共 ${state.finance.length} 条记录</span>
             </div>
           </div>
@@ -258,7 +258,7 @@ function financeMetric(label, value, hint, iconName, tone) {
       <span class="module-icon ${tone}">${icon(iconName)}</span>
       <div>
         <span>${escapeHtml(label)}</span>
-        <strong>${formatCurrency(value)}</strong>
+        <strong title="${escapeHtml(formatCurrency(value))}">${formatCompactCurrency(value)}</strong>
         <small>${escapeHtml(hint)}</small>
       </div>
     </div>

@@ -134,15 +134,25 @@ function sortingOtherFromRequirement(value) {
 }
 
 function normalizeMachineRecord(item, index = 0) {
-  if (item.type) return item;
   const groupIndex = Math.floor(index / 2) + 1;
   const isTest = index % 2 === 1;
+  if (item.type) {
+    return {
+      ...item,
+      group: item.group || item.productionGroup || item.area || (item.type === "测试机" ? "测试组" : "分选组"),
+      status: item.status || "待机",
+      job: item.job || "等待排产",
+      progress: Math.max(0, Math.min(100, Number(item.progress || 0))),
+      updatedAt: item.updatedAt || todayString(),
+    };
+  }
   return {
     ...item,
     id: item.id || `m-${index + 1}`,
     type: isTest ? "测试机" : "分选机",
     name: isTest ? `测试机 T-${String(groupIndex).padStart(2, "0")}` : `分选机 S-${String(groupIndex).padStart(2, "0")}`,
     area: isTest ? "测试区" : "分选区",
+    group: item.group || item.productionGroup || `生产组 ${String(groupIndex).padStart(2, "0")}`,
   };
 }
 
@@ -257,7 +267,9 @@ function normalizeProductionRecord(item, index = 0) {
     unit: item.unit || "K",
     unitPrice: item.unitPrice ?? "",
     amount: item.amount ?? "",
+    startDate: item.startDate || item.orderDate || item.createdAt || item.dueDate || todayString(),
     dueDate: item.dueDate || todayString(),
+    machineGroup: item.machineGroup || item.group || "",
     machineId: item.machineId || "",
     priority: item.priority || "标准",
     status,

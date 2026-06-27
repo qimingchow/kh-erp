@@ -392,7 +392,7 @@ button {
 
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 16px;
   padding: 0 24px;
 }
@@ -403,7 +403,7 @@ button {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 14px;
-  padding: 20px;
+  padding: 20px 18px;
   display: flex;
   align-items: flex-start;
   gap: 18px;
@@ -452,12 +452,13 @@ button {
 .kpi .value {
   margin-top: 8px;
   max-width: 100%;
-  font-size: clamp(21px, 1.7vw, 30px);
+  font-size: clamp(24px, 2vw, 30px);
   line-height: 1.05;
   font-weight: 800;
   letter-spacing: 0;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
 
@@ -767,8 +768,9 @@ button {
   font-size: clamp(20px, 1.45vw, 24px);
   line-height: 1.05;
   letter-spacing: 0;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1494,6 +1496,14 @@ tr:hover td {
   overflow: hidden;
 }
 
+.gantt-panel-wide {
+  width: 100%;
+}
+
+.production-view-content {
+  min-width: 0;
+}
+
 .gantt-head {
   display: flex;
   align-items: center;
@@ -1832,6 +1842,59 @@ tr:hover td {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
   gap: 14px;
+}
+
+.machine-group-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.machine-group-strip button {
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.machine-group-strip button.active {
+  border-color: var(--primary);
+  background: var(--primary-weak);
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.machine-list-panel {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  box-shadow: var(--shadow-soft);
+}
+
+.machine-card-preview {
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  background: #f8fafc;
+  padding: 12px 14px;
+}
+
+.machine-card-preview summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #334155;
+}
+
+.machine-card-preview[open] {
+  display: grid;
+  gap: 12px;
 }
 
 .machine-status-card {

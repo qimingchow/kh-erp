@@ -18,7 +18,7 @@ import {
   setUi,
 } from "./lib/state.js";
 import { icon } from "./lib/icons.js";
-import { escapeHtml, formatCurrency, formatNumber, sum, timestampNow } from "./lib/format.js";
+import { escapeHtml, formatCompactCurrency, formatCompactNumber, formatCurrency, formatNumber, sum, timestampNow } from "./lib/format.js";
 import {
   createFinance,
   createInbound,
@@ -30,6 +30,8 @@ import {
   deleteInventory,
   deleteOutbound,
   deleteFinance,
+  deleteMachine,
+  getPendingInboundRecords,
   updateMachine,
   importMachines,
   productionToInventory,
@@ -45,6 +47,7 @@ import {
   deleteOutboundRemote,
   deleteProductionRemote,
   deleteFinanceRemote,
+  deleteMachineRemote,
   deleteUserRemote,
   isServerMode,
   loginRemote,
@@ -118,10 +121,6 @@ function renderAuthBar(auth, currentUser) {
         <div class="auth-title">${escapeHtml(currentUser.name)} · ${escapeHtml(ROLE_LABELS[currentUser.role] || currentUser.role)}</div>
         <div class="auth-sub">当前账号：${escapeHtml(currentUser.username)}，${currentUser.role === "admin" ? "拥有全部操作权限" : `可编辑：${escapeHtml((currentUser.editableResources || ["inbound"]).map((item) => RESOURCE_LABELS[item] || item).join("、"))}`}</div>
       </div>
-      <label class="global-search" aria-label="全局搜索">
-        <span class="icon">${icon("search")}</span>
-        <input type="search" placeholder="搜索客户 / 订单 / 物料" />
-      </label>
       <div class="auth-actions">
         <button class="header-icon-btn" type="button" aria-label="通知">
           <span class="icon">${icon("bell")}</span>
@@ -174,7 +173,8 @@ function renderKpis(state) {
   }
 
   elements.kpis.hidden = false;
-  const inboundQty = sum(state.inbound, (item) => item.orderQty || item.qty);
+  const pendingInbound = getPendingInboundRecords(state);
+  const inboundQty = sum(pendingInbound, (item) => item.orderQty || item.qty);
   const stockQty = sum(state.inventory, (item) => item.qty);
   const runningMachines = state.machines.filter((item) => item.status === "运行").length;
   const pendingPlans = state.production.filter((item) => item.status !== "已完成").length;
@@ -192,11 +192,11 @@ function renderKpis(state) {
   const lowStock = state.inventory.filter((item) => item.qty <= item.safe).length;
 
   const items = [
-    { label: "待处理来料", value: formatNumber(inboundQty), hint: "较昨日 0", icon: "inbox", tone: "blue" },
-    { label: "当前库存", value: formatNumber(stockQty), hint: `${lowStock} 个物料预警`, icon: "boxes", tone: "green" },
-    { label: "在制计划", value: formatNumber(pendingPlans), hint: "排产中和待排产", icon: "calendar", tone: "amber" },
+    { label: "待处理来料", value: formatCompactNumber(inboundQty), hint: `${formatNumber(pendingInbound.length)} 条未转生产`, icon: "inbox", tone: "blue" },
+    { label: "当前库存", value: formatCompactNumber(stockQty), hint: `${lowStock} 个物料预警`, icon: "boxes", tone: "green" },
+    { label: "在制计划", value: formatCompactNumber(pendingPlans), hint: "排产中和待排产", icon: "calendar", tone: "amber" },
     { label: "运行机台", value: formatNumber(runningMachines), hint: "在线设备状态", icon: "monitor", tone: "blue" },
-    { label: "待收账款", value: formatCurrency(pendingReceivable), hint: "出库后待回款", icon: "landmark", tone: "red" },
+    { label: "待收账款", value: formatCompactCurrency(pendingReceivable), hint: "出库后待回款", icon: "landmark", tone: "red" },
   ];
 
   elements.kpis.innerHTML = items
@@ -324,6 +324,7 @@ function updateMachineFiltersFromDom() {
       keyword: document.querySelector('[data-machine-filter="keyword"]')?.value || "",
       type: document.querySelector('[data-machine-filter="type"]')?.value || "",
       status: document.querySelector('[data-machine-filter="status"]')?.value || "",
+      group: document.querySelector('[data-machine-filter="group"]')?.value || "",
     },
     machineVisibleLimit: 24,
   });
@@ -670,9 +671,9 @@ function downloadTextFile(filename, content, type = "text/plain;charset=utf-8") 
 
 function machineTemplateCsv() {
   return [
-    "机台ID,机台类型,机台名称,区域,状态,当前任务,操作员,班次,进度,最近更新",
-    "sorter-001,分选机,分选机 S-001,分选区,待机,等待排产,张工,白班,0,2026-06-24 08:00",
-    "tester-001,测试机,测试机 T-001,测试区,待机,等待排产,李工,白班,0,2026-06-24 08:00",
+    "机台ID,机台类型,机台名称,生产组,区域,状态,当前任务,操作员,班次,进度,最近更新",
+    "sorter-001,分选机,分选机 S-001,一组,分选区,待机,等待排产,张工,白班,0,2026-06-24 08:00",
+    "tester-001,测试机,测试机 T-001,一组,测试区,待机,等待排产,李工,白班,0,2026-06-24 08:00",
   ].join("\n");
 }
 
@@ -681,6 +682,7 @@ function exportMachineCsv() {
     machine.id,
     machine.type,
     machine.name,
+    machine.group || machine.area || "",
     machine.area,
     machine.status,
     machine.job,
@@ -690,7 +692,7 @@ function exportMachineCsv() {
     machine.updatedAt,
   ]);
   const csv = [
-    "机台ID,机台类型,机台名称,区域,状态,当前任务,操作员,班次,进度,最近更新",
+    "机台ID,机台类型,机台名称,生产组,区域,状态,当前任务,操作员,班次,进度,最近更新",
     ...rows.map((row) => row.map((cell) => `"${String(cell ?? "").replaceAll('"', '""')}"`).join(",")),
   ].join("\n");
   downloadTextFile(`坤禾半导体机台清单-${new Date().toISOString().slice(0, 10)}.csv`, `\ufeff${csv}`, "text/csv;charset=utf-8");
@@ -737,6 +739,7 @@ function parseMachineCsv(text) {
     id: findIndex("机台ID", "id", "ID"),
     type: findIndex("机台类型", "类型", "type"),
     name: findIndex("机台名称", "名称", "name"),
+    group: findIndex("生产组", "分组", "group", "productionGroup"),
     area: findIndex("区域", "area"),
     status: findIndex("状态", "status"),
     job: findIndex("当前任务", "任务", "job"),
@@ -753,6 +756,7 @@ function parseMachineCsv(text) {
       id: pick("id") || `machine-${String(index + 1).padStart(3, "0")}`,
       type: pick("type"),
       name: pick("name"),
+      group: pick("group"),
       area: pick("area"),
       status: pick("status"),
       job: pick("job"),
@@ -901,6 +905,20 @@ document.addEventListener("click", (event) => {
         keyword: "",
         type: "",
         status: "",
+        group: "",
+      },
+      machineVisibleLimit: 24,
+    });
+    render();
+    return;
+  }
+
+  if (action === "machine-group-filter") {
+    const group = button.getAttribute("data-group") || "";
+    setUi({
+      machineFilters: {
+        ...(getState().ui?.machineFilters || {}),
+        group,
       },
       machineVisibleLimit: 24,
     });
@@ -1161,6 +1179,12 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (action === "production-view-mode") {
+    setUi({ productionViewMode: button.getAttribute("data-mode") === "gantt" ? "gantt" : "list" });
+    render();
+    return;
+  }
+
   if (action === "production-new") {
     if (!ensureCanEdit("production")) return;
     setUi({
@@ -1324,6 +1348,29 @@ document.addEventListener("click", (event) => {
         .catch((error) => alert(error.message || "机台更新失败"));
     } else {
       mutateState((draft) => updateMachine(draft, machineId, patch));
+      render();
+    }
+    return;
+  }
+
+  if (action === "machine-delete") {
+    const currentUser = getCurrentUser();
+    if (currentUser?.role !== "admin") {
+      alert("只有管理员可以删除机台。");
+      return;
+    }
+    if (!confirmDangerAction(button)) return;
+    const machineId = button.getAttribute("data-machine");
+    if (isServerMode()) {
+      deleteMachineRemote(machineId, getAuthToken())
+        .then((payload) => {
+          assignRecordState(payload);
+          render();
+        })
+        .catch((error) => alert(error.message || "删除失败"));
+    } else {
+      const result = mutateState((draft) => deleteMachine(draft, machineId));
+      if (result.ok === false) alert(result.message || "删除失败");
       render();
     }
     return;

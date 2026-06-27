@@ -392,7 +392,9 @@ function saveProductionRecord(state, payload) {
         : payload.unitPrice
           ? Number((parseNumber(payload.qty) * parseNumber(payload.unitPrice)).toFixed(2))
           : "",
+    startDate: payload.startDate || payload.orderDate || payload.dueDate || todayText(),
     dueDate: payload.dueDate || todayText(),
+    machineGroup: String(payload.machineGroup || payload.group || "").trim(),
     machineId: String(payload.machineId || "").trim(),
     priority: payload.priority || "标准",
     status: progressStatus.status,
@@ -505,6 +507,22 @@ function updateMachineRecord(state, machineId, patch) {
   return { ok: true, record: machine };
 }
 
+function deleteMachineRecord(state, machineId) {
+  const index = state.machines.findIndex((item) => item.id === machineId);
+  if (index < 0) return { ok: false, message: "机台不存在。" };
+
+  state.machines.splice(index, 1);
+  state.production.forEach((plan) => {
+    if (plan.machineId !== machineId) return;
+    plan.machineId = "";
+    plan.note = plan.note
+      ? `${plan.note}；原绑定机台已删除，请重新分配。`
+      : "原绑定机台已删除，请重新分配生产组和机台。";
+    plan.updatedAt = timestampText();
+  });
+  return { ok: true };
+}
+
 function normalizeMachineImportRecord(record, index = 0) {
   const type = record.type === "测试机" ? "测试机" : "分选机";
   const fallbackPrefix = type === "测试机" ? "T" : "S";
@@ -514,6 +532,7 @@ function normalizeMachineImportRecord(record, index = 0) {
     type,
     name: String(record.name || `${type} ${fallbackPrefix}-${fallbackNo}`).trim(),
     area: String(record.area || (type === "测试机" ? "测试区" : "分选区")).trim(),
+    group: String(record.group || record.productionGroup || record.area || "默认生产组").trim(),
     status: ["运行", "待机", "维护", "故障", "异常"].includes(record.status) ? record.status : "待机",
     job: String(record.job || "等待排产").trim(),
     operator: String(record.operator || "").trim(),
@@ -866,6 +885,19 @@ async function handleApi(req, res, pathname) {
       return;
     }
     const result = updateMachineRecord(db.state, decodeURIComponent(machineMatch[1]), (await readBody(req)).patch || {});
+    if (result.ok === false) {
+      sendError(res, 400, result.message);
+      return;
+    }
+    writeDb(db);
+    sendJson(res, 200, buildBootstrap(db, context.user, context.token));
+    return;
+  }
+
+  if (machineMatch && method === "DELETE") {
+    const context = requireAdmin(req, res, db);
+    if (!context) return;
+    const result = deleteMachineRecord(db.state, decodeURIComponent(machineMatch[1]));
     if (result.ok === false) {
       sendError(res, 400, result.message);
       return;

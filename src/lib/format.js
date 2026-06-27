@@ -28,6 +28,24 @@ export function formatNumber(value) {
   return new Intl.NumberFormat("zh-CN").format(Number(value || 0));
 }
 
+export function formatCompactNumber(value) {
+  const number = Number(value || 0);
+  if (Math.abs(number) < 100000) return formatNumber(number);
+  return new Intl.NumberFormat("zh-CN", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(number);
+}
+
+export function formatCompactCurrency(value) {
+  const number = Number(value || 0);
+  if (Math.abs(number) < 100000) return formatCurrency(number);
+  return `¥${new Intl.NumberFormat("zh-CN", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(number)}`;
+}
+
 export function parseNumber(value) {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   const raw = String(value ?? "").trim();

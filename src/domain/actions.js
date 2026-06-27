@@ -393,7 +393,9 @@ export function productionRecordFromForm(formData, existingId = "") {
     unit: formData.get("unit") || "K",
     unitPrice: formData.get("unitPrice") ? unitPrice : "",
     amount: formData.get("amount") ? manualAmount : unitPrice ? Number((qty * unitPrice).toFixed(2)) : "",
+    startDate: formData.get("startDate") || new Date().toISOString().slice(0, 10),
     dueDate: formData.get("dueDate"),
+    machineGroup: formData.get("machineGroup") || "",
     machineId: formData.get("machineId"),
     priority: formData.get("priority"),
     status: progressStatus.status,
@@ -473,6 +475,34 @@ export function deleteProduction(state, id) {
   if (state.ui?.productionEditingId === id) state.ui.productionEditingId = null;
   if (state.ui?.productionViewingId === id) state.ui.productionViewingId = null;
   return { ok: true };
+}
+
+export function hasInboundDownstream(state, inbound) {
+  const orderNo = String(inbound?.orderNo || "").trim();
+  const inboundId = String(inbound?.id || "").trim();
+  if (!orderNo && !inboundId) return false;
+  const tokens = [orderNo, inboundId].filter(Boolean);
+  const containsToken = (value) => tokens.some((token) => String(value || "").includes(token));
+
+  return (
+    state.production.some(
+      (plan) =>
+        tokens.includes(String(plan.orderNo || "").trim()) ||
+        tokens.includes(String(plan.sourceInboundId || "").trim()) ||
+        containsToken(plan.note),
+    ) ||
+    state.outbound.some(
+      (record) =>
+        tokens.includes(String(record.orderNo || "").trim()) ||
+        tokens.includes(String(record.sourceInboundId || "").trim()) ||
+        containsToken(record.note),
+    ) ||
+    state.finance.some((record) => containsToken(record.source) || containsToken(record.note))
+  );
+}
+
+export function getPendingInboundRecords(state) {
+  return (state.inbound || []).filter((item) => !hasInboundDownstream(state, item));
 }
 
 export function financeRecordFromForm(formData, existingId = "") {
@@ -571,6 +601,24 @@ export function updateMachine(state, machineId, patch) {
   return { ok: true };
 }
 
+export function deleteMachine(state, machineId) {
+  const index = state.machines.findIndex((item) => item.id === machineId);
+  if (index < 0) return { ok: false, message: "机台不存在。" };
+
+  state.machines.splice(index, 1);
+  state.production.forEach((plan) => {
+    if (plan.machineId !== machineId) return;
+    plan.machineId = "";
+    if (!plan.note) {
+      plan.note = "原绑定机台已删除，请重新分配生产组和机台。";
+    } else if (!String(plan.note).includes("原绑定机台已删除")) {
+      plan.note = `${plan.note}；原绑定机台已删除，请重新分配。`;
+    }
+    plan.updatedAt = timestampNow();
+  });
+  return { ok: true };
+}
+
 function normalizeMachineImportRecord(record, index = 0) {
   const type = record.type === "测试机" ? "测试机" : "分选机";
   const fallbackPrefix = type === "测试机" ? "T" : "S";
@@ -580,6 +628,7 @@ function normalizeMachineImportRecord(record, index = 0) {
     type,
     name: String(record.name || `${type} ${fallbackPrefix}-${fallbackNo}`).trim(),
     area: String(record.area || (type === "测试机" ? "测试区" : "分选区")).trim(),
+    group: String(record.group || record.productionGroup || record.area || "默认生产组").trim(),
     status: ["运行", "待机", "维护", "故障", "异常"].includes(record.status) ? record.status : "待机",
     job: String(record.job || "等待排产").trim(),
     operator: String(record.operator || "").trim(),
