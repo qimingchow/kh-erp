@@ -16,7 +16,7 @@ function groupMachines(machines) {
 }
 
 function machineGroupName(machine = {}) {
-  return machine.group || machine.productionGroup || machine.area || "未分组";
+  return machine.group || machine.productionGroup || "未分组";
 }
 
 function matchesMachineFilters(machine, filters = {}) {
@@ -49,10 +49,9 @@ function matchesMachineFilters(machine, filters = {}) {
 export function renderMachine(state, auth = {}) {
   const editable = canEdit(auth?.currentUser, "machine");
   const filters = state.ui?.machineFilters || {};
-  const visibleLimit = Number(state.ui?.machineVisibleLimit || 24);
   const filteredMachines = state.machines.filter((machine) => matchesMachineFilters(machine, filters));
-  const visibleMachines = filteredMachines.slice(0, visibleLimit);
-  const grouped = groupMachines(visibleMachines);
+  const previewMachines = filteredMachines.slice(0, 24);
+  const grouped = groupMachines(previewMachines);
   const orderedTypes = [...MACHINE_TYPES, ...[...grouped.keys()].filter((type) => !MACHINE_TYPES.includes(type))];
   const uniqueTypes = [...new Set(orderedTypes)];
   const runningMachines = filteredMachines.filter((item) => item.status === "运行").length;
@@ -158,7 +157,7 @@ export function renderMachine(state, auth = {}) {
   const activePlans = state.production.filter((item) => item.status === "进行中");
 
   return `
-    <div class="content-grid">
+    <div class="page-stack machine-page">
       <section class="panel machine-main-panel">
         <div class="panel-header machine-panel-header">
           <div>
@@ -184,7 +183,7 @@ export function renderMachine(state, auth = {}) {
             <div class="module-stat">
               <span>运行机台</span>
               <strong>${formatNumber(runningMachines)}</strong>
-              <span>显示 ${formatNumber(filteredMachines.length)} / 共 ${formatNumber(state.machines.length)} 台</span>
+              <span>筛选 ${formatNumber(filteredMachines.length)} / 共 ${formatNumber(state.machines.length)} 台</span>
             </div>
           <div class="filter-bar compact machine-filter-bar">
             <label class="filter-field">
@@ -261,9 +260,9 @@ export function renderMachine(state, auth = {}) {
               <h3>机台列表</h3>
               <p>机台数量较多时以列表为主，可按类型、状态、生产组和关键词快速定位。</p>
             </div>
-            <div class="small">显示 ${formatNumber(visibleMachines.length)} / ${formatNumber(filteredMachines.length)} 台</div>
+            <div class="small">共 ${formatNumber(filteredMachines.length)} 台</div>
           </div>
-          ${renderTable(machineColumns, visibleMachines)}
+          ${renderTable(machineColumns, filteredMachines, { pageKey: "machine", ui: state.ui, pageSize: 20 })}
         </section>
         <details class="machine-card-preview">
           <summary>查看卡片预览</summary>
@@ -272,16 +271,6 @@ export function renderMachine(state, auth = {}) {
           `<div class="empty">没有找到匹配的机台。可以重置筛选，或按模板批量导入分选机、测试机信息。</div>`
         }
         </details>
-        ${
-          filteredMachines.length > visibleMachines.length
-            ? `
-              <div class="load-more-row">
-                <span>已显示 ${formatNumber(visibleMachines.length)} 台，还有 ${formatNumber(filteredMachines.length - visibleMachines.length)} 台未展开。</span>
-                <button class="btn" type="button" data-action="machine-show-more">显示更多</button>
-              </div>
-            `
-            : ""
-        }
       </section>
 
       <aside class="panel">

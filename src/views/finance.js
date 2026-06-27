@@ -188,7 +188,7 @@ export function renderFinance(state, auth = {}) {
             `
             : ""
         }
-        ${renderTable(columns, state.finance)}
+        ${renderTable(columns, state.finance, { pageKey: "finance", ui: state.ui })}
       </section>
 
       <aside class="panel">

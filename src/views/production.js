@@ -5,7 +5,7 @@ import { getMachineName } from "../domain/actions.js";
 import { canEdit } from "../lib/state.js";
 
 function machineGroupName(machine = {}) {
-  return machine.group || machine.productionGroup || machine.area || "未分组";
+  return machine.group || machine.productionGroup || "未分组";
 }
 
 function defaultProductionValues(record = {}, draftInbound = null, state = { machines: [] }) {
@@ -196,7 +196,7 @@ export function renderProduction(state, auth = {}) {
         ${!editable ? `<div class="empty">当前账号没有生产计划维护权限，可查看排产数据。</div>` : ""}
         ${
           viewMode === "list"
-            ? `<div class="production-view-content">${renderTable(columns, state.production)}</div>`
+            ? `<div class="production-view-content">${renderTable(columns, state.production, { pageKey: "production", ui: state.ui })}</div>`
             : `
           <div class="gantt-panel gantt-panel-wide">
             <div class="gantt-head">

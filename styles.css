@@ -486,6 +486,10 @@ button {
   padding: 0 24px 24px;
 }
 
+.machine-page {
+  max-width: none;
+}
+
 .query-panel {
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -1006,6 +1010,82 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: max-content;
+}
+
+.table-pager {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 4px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.table-pager-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.table-pager .btn[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.page-size-select {
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  font-size: 12px;
+  padding: 0 28px 0 10px;
+}
+
+.overview-finance-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.finance-chip {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.finance-chip span,
+.finance-chip small {
+  color: var(--muted);
+}
+
+.finance-chip strong {
+  min-width: 0;
+  font-size: clamp(18px, 1.55vw, 24px);
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.finance-chip.received strong,
+.finance-chip.balance strong {
+  color: #16a34a;
+}
+
+.finance-chip.pending strong,
+.finance-chip.payable strong {
+  color: var(--danger);
 }
 
 .record-list {
@@ -1801,6 +1881,11 @@ tr:hover td {
   min-width: 0;
 }
 
+.machine-page > .panel,
+.machine-page > aside {
+  width: 100%;
+}
+
 .machine-panel-header {
   align-items: flex-start;
 }
@@ -1877,6 +1962,19 @@ tr:hover td {
   display: grid;
   gap: 12px;
   box-shadow: var(--shadow-soft);
+}
+
+.machine-list-panel .responsive-table table {
+  min-width: 980px;
+}
+
+.machine-list-panel th:last-child,
+.machine-list-panel td:last-child {
+  min-width: 230px;
+}
+
+.machine-list-panel .row-actions {
+  justify-content: flex-start;
 }
 
 .machine-card-preview {
@@ -2648,6 +2746,10 @@ tr:hover td {
     grid-template-columns: 1fr;
   }
 
+  .overview-finance-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .users-layout {
     grid-template-columns: 1fr;
   }
@@ -2655,6 +2757,15 @@ tr:hover td {
   .metric-grid.four,
   .capacity-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .table-pager {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .table-pager-actions {
+    justify-content: flex-start;
   }
 
   .split-workbench,
@@ -3017,6 +3128,18 @@ tr:hover td {
   .kpi .value,
   .stats-card strong {
     font-size: 28px;
+  }
+
+  .overview-finance-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .table-pager-actions {
+    width: 100%;
+  }
+
+  .page-size-select {
+    width: 100%;
   }
 
   .machine-status-card,

@@ -1,4 +1,4 @@
-import { escapeHtml } from "../lib/format.js";
+import { escapeHtml, formatNumber } from "../lib/format.js";
 import { icon } from "../lib/icons.js";
 
 const statusTone = {
@@ -126,12 +126,63 @@ export function renderForm(formKey, fields, submitLabel, values = {}) {
   `;
 }
 
-export function renderTable(columns, rows) {
+function tablePagination(rows, options = {}) {
+  const pageKey = options.pageKey || "";
+  if (!pageKey) return { pageRows: rows, pager: "" };
+
+  const ui = options.ui || {};
+  const pageSizes = options.pageSizes || [10, 20, 50, 100];
+  const selectedSize = Number(ui.tablePageSizes?.[pageKey] || options.pageSize || pageSizes[0] || 10);
+  const pageSize = pageSizes.includes(selectedSize) ? selectedSize : pageSizes[0] || 10;
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const requestedPage = Number(ui.tablePages?.[pageKey] || 1);
+  const page = Math.max(1, Math.min(totalPages, Number.isFinite(requestedPage) ? requestedPage : 1));
+  const start = (page - 1) * pageSize;
+  const pageRows = rows.slice(start, start + pageSize);
+
+  if (total <= pageSize) return { pageRows, pager: "" };
+
+  const pageNumbers = [...new Set([1, page - 1, page, page + 1, totalPages])]
+    .filter((item) => item >= 1 && item <= totalPages)
+    .sort((a, b) => a - b);
+
+  const pager = `
+    <div class="table-pager">
+      <div class="table-pager-info">
+        共 ${formatNumber(total)} 条，第 ${formatNumber(page)} / ${formatNumber(totalPages)} 页
+      </div>
+      <div class="table-pager-actions">
+        <button class="btn mini" type="button" data-action="table-page" data-page-key="${escapeHtml(pageKey)}" data-page="${page - 1}" ${page <= 1 ? "disabled" : ""}>上一页</button>
+        ${pageNumbers
+          .map(
+            (item) => `
+              <button class="btn mini ${item === page ? "primary" : ""}" type="button" data-action="table-page" data-page-key="${escapeHtml(pageKey)}" data-page="${item}">
+                ${formatNumber(item)}
+              </button>
+            `,
+          )
+          .join("")}
+        <button class="btn mini" type="button" data-action="table-page" data-page-key="${escapeHtml(pageKey)}" data-page="${page + 1}" ${page >= totalPages ? "disabled" : ""}>下一页</button>
+        <select class="page-size-select" data-table-page-size data-page-key="${escapeHtml(pageKey)}" aria-label="每页条数">
+          ${pageSizes
+            .map((size) => `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size} 条/页</option>`)
+            .join("")}
+        </select>
+      </div>
+    </div>
+  `;
+
+  return { pageRows, pager };
+}
+
+export function renderTable(columns, rows, options = {}) {
   if (!rows.length) return `<div class="empty">当前还没有记录。</div>`;
+  const { pageRows, pager } = tablePagination(rows, options);
 
   return `
     <div class="record-list">
-      ${rows
+      ${pageRows
         .map(
           (row) => `
             <article class="record-card">
@@ -159,7 +210,7 @@ export function renderTable(columns, rows) {
           </tr>
         </thead>
         <tbody>
-          ${rows
+          ${pageRows
             .map(
               (row) => `
                 <tr>
@@ -171,6 +222,7 @@ export function renderTable(columns, rows) {
         </tbody>
       </table>
     </div>
+    ${pager}
   `;
 }
 

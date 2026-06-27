@@ -1,16 +1,75 @@
 import { badge } from "../ui/components.js";
 import { icon } from "../lib/icons.js";
-import { escapeHtml, formatCurrency, formatDate, formatNumber } from "../lib/format.js";
+import { escapeHtml, formatCompactCurrency, formatCurrency, formatDate, formatNumber } from "../lib/format.js";
 import { getPendingInboundRecords } from "../domain/actions.js";
+
+function financePaidAmount(record = {}) {
+  const amount = Number(record.amount || 0);
+  if (record.type === "收款" || record.type === "付款") return amount;
+  if (record.status === "已收" || record.status === "已付") return amount;
+  if (record.status === "部分收款") return Math.max(0, Math.min(amount, Number(record.paidAmount || 0)));
+  return Math.max(0, Math.min(amount, Number(record.paidAmount || 0)));
+}
+
+function remainingReceivable(record = {}) {
+  if (record.type !== "应收") return 0;
+  return Math.max(0, Number(record.amount || 0) - financePaidAmount(record));
+}
+
+function remainingPayable(record = {}) {
+  if (record.type !== "应付") return 0;
+  return Math.max(0, Number(record.amount || 0) - financePaidAmount(record));
+}
+
+function financeRecordsForOverview(state) {
+  const existing = Array.isArray(state.finance) ? [...state.finance] : [];
+  const knownOutbound = new Set(
+    existing
+      .filter((item) => item.outboundId)
+      .map((item) => item.outboundId),
+  );
+  const knownSources = existing.map((item) => String(item.source || ""));
+
+  const fallbackReceivables = (state.outbound || [])
+    .filter(
+      (item) =>
+        item.id &&
+        !knownOutbound.has(item.id) &&
+        !knownSources.some((source) => item.orderNo && source.includes(item.orderNo)),
+    )
+    .map((item) => ({
+      type: "应收",
+      amount: Number(item.amount || 0),
+      paidAmount: Number(item.paidAmount || 0),
+      status: item.settlement || "待收",
+      outboundId: item.id,
+    }));
+
+  return [...existing, ...fallbackReceivables];
+}
 
 export function renderOverview(state) {
   const pendingInbound = getPendingInboundRecords(state);
   const pendingPlans = state.production.filter((item) => item.status !== "已完成");
+  const financeRecords = financeRecordsForOverview(state);
+  const receivedReceivable = financeRecords.reduce((total, item) => {
+    if (item.type === "收款") return total + Number(item.amount || 0);
+    if (item.type === "应收") return total + financePaidAmount(item);
+    return total;
+  }, 0);
+  const pendingReceivable = financeRecords.reduce((total, item) => total + remainingReceivable(item), 0);
+  const pendingPayable = financeRecords.reduce((total, item) => total + remainingPayable(item), 0);
+  const paidOut = financeRecords.reduce((total, item) => {
+    if (item.type === "付款") return total + Number(item.amount || 0);
+    if (item.type === "应付") return total + financePaidAmount(item);
+    return total;
+  }, 0);
+  const accountBalance = receivedReceivable - paidOut;
   const flowItems = [
     { step: "待转生产", title: "来料录入", count: pendingInbound.length, icon: "inbox", tone: "blue" },
     { step: "销售/客户", title: "出库记录", count: state.outbound.length, icon: "truck", tone: "purple" },
     { step: "生产计划", title: "生产计划", count: state.production.length, icon: "calendar", tone: "orange" },
-    { step: "财务执行", title: "财务记录", count: state.finance.length, icon: "landmark", tone: "blue" },
+    { step: "财务执行", title: "财务记录", count: financeRecords.length, icon: "landmark", tone: "blue" },
   ];
 
   const recent = [
@@ -85,6 +144,29 @@ export function renderOverview(state) {
                 .join("")}
             </tbody>
           </table>
+        </div>
+
+        <div class="overview-finance-strip">
+          <div class="finance-chip received">
+            <span>已收账款</span>
+            <strong>${formatCompactCurrency(receivedReceivable)}</strong>
+            <small>实际回款</small>
+          </div>
+          <div class="finance-chip pending">
+            <span>待收账款</span>
+            <strong>${formatCompactCurrency(pendingReceivable)}</strong>
+            <small>出库后未回款</small>
+          </div>
+          <div class="finance-chip payable">
+            <span>待付账款</span>
+            <strong>${formatCompactCurrency(pendingPayable)}</strong>
+            <small>供应商/费用待付</small>
+          </div>
+          <div class="finance-chip balance">
+            <span>现金余额</span>
+            <strong>${formatCompactCurrency(accountBalance)}</strong>
+            <small>已收 - 已付</small>
+          </div>
         </div>
 
         <div class="overview-subgrid">

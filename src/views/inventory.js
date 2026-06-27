@@ -168,7 +168,7 @@ export function renderInventory(state, auth = {}) {
           </div>
         </div>
         ${!editable ? `<div class="empty">当前账号没有库存维护权限，可查看库存数据。</div>` : ""}
-        ${renderTable(columns, state.inventory)}
+        ${renderTable(columns, state.inventory, { pageKey: "inventory", ui: state.ui })}
       </section>
 
       ${formOpen ? `

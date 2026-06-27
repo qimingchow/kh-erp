@@ -136,10 +136,12 @@ function sortingOtherFromRequirement(value) {
 function normalizeMachineRecord(item, index = 0) {
   const groupIndex = Math.floor(index / 2) + 1;
   const isTest = index % 2 === 1;
+  const defaultGroup = item.type === "测试机" || isTest ? "测试组" : "分选组";
+  const existingGroup = item.group && item.group !== item.area ? item.group : "";
   if (item.type) {
     return {
       ...item,
-      group: item.group || item.productionGroup || item.area || (item.type === "测试机" ? "测试组" : "分选组"),
+      group: existingGroup || item.productionGroup || defaultGroup,
       status: item.status || "待机",
       job: item.job || "等待排产",
       progress: Math.max(0, Math.min(100, Number(item.progress || 0))),

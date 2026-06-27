@@ -173,7 +173,7 @@ export function renderOutbound(state, auth = {}) {
           <button class="btn primary" type="button">查询</button>
         </div>
         ${!editable ? `<div class="empty">当前账号没有出库维护权限，可查看出库和财务联动数据。</div>` : ""}
-        ${renderTable(columns, state.outbound)}
+        ${renderTable(columns, state.outbound, { pageKey: "outbound", ui: state.ui })}
       </section>
 
       ${formOpen ? `

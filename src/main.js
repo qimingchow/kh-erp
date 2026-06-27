@@ -178,7 +178,25 @@ function renderKpis(state) {
   const stockQty = sum(state.inventory, (item) => item.qty);
   const runningMachines = state.machines.filter((item) => item.status === "运行").length;
   const pendingPlans = state.production.filter((item) => item.status !== "已完成").length;
-  const pendingReceivable = sum(state.finance, (item) => {
+  const knownFinanceOutbound = new Set((state.finance || []).filter((item) => item.outboundId).map((item) => item.outboundId));
+  const knownFinanceSources = (state.finance || []).map((item) => String(item.source || ""));
+  const financeRecords = [
+    ...(state.finance || []),
+    ...(state.outbound || [])
+      .filter(
+        (item) =>
+          item.id &&
+          !knownFinanceOutbound.has(item.id) &&
+          !knownFinanceSources.some((source) => item.orderNo && source.includes(item.orderNo)),
+      )
+      .map((item) => ({
+        type: "应收",
+        amount: Number(item.amount || 0),
+        paidAmount: Number(item.paidAmount || 0),
+        status: item.settlement || "待收",
+      })),
+  ];
+  const pendingReceivable = sum(financeRecords, (item) => {
     if (item.type !== "应收") return 0;
     const amount = Number(item.amount || 0);
     const paid =
@@ -189,6 +207,14 @@ function renderKpis(state) {
           : 0;
     return Math.max(0, amount - paid);
   });
+  const receivedReceivable = sum(financeRecords, (item) => {
+    const amount = Number(item.amount || 0);
+    if (item.type === "收款") return amount;
+    if (item.type !== "应收") return 0;
+    if (item.status === "已收") return amount;
+    if (item.status === "部分收款") return Math.max(0, Math.min(amount, Number(item.paidAmount || 0)));
+    return Math.max(0, Math.min(amount, Number(item.paidAmount || 0)));
+  });
   const lowStock = state.inventory.filter((item) => item.qty <= item.safe).length;
 
   const items = [
@@ -196,6 +222,7 @@ function renderKpis(state) {
     { label: "当前库存", value: formatCompactNumber(stockQty), hint: `${lowStock} 个物料预警`, icon: "boxes", tone: "green" },
     { label: "在制计划", value: formatCompactNumber(pendingPlans), hint: "排产中和待排产", icon: "calendar", tone: "amber" },
     { label: "运行机台", value: formatNumber(runningMachines), hint: "在线设备状态", icon: "monitor", tone: "blue" },
+    { label: "已收账款", value: formatCompactCurrency(receivedReceivable), hint: "实际已回款", icon: "check", tone: "green" },
     { label: "待收账款", value: formatCompactCurrency(pendingReceivable), hint: "出库后待回款", icon: "landmark", tone: "red" },
   ];
 
@@ -305,6 +332,7 @@ function updateInboundFiltersFromDom() {
       status: document.querySelector('[data-filter="inbound-status"]')?.value || "",
       keyword: document.querySelector('[data-filter="inbound-keyword"]')?.value || "",
     },
+    tablePages: { ...(getState().ui?.tablePages || {}), inbound: 1 },
   });
   render();
   if (!activeFilter) return;
@@ -326,7 +354,7 @@ function updateMachineFiltersFromDom() {
       status: document.querySelector('[data-machine-filter="status"]')?.value || "",
       group: document.querySelector('[data-machine-filter="group"]')?.value || "",
     },
-    machineVisibleLimit: 24,
+    tablePages: { ...(getState().ui?.tablePages || {}), machine: 1 },
   });
   render();
   if (!activeFilter) return;
@@ -889,6 +917,20 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (action === "table-page") {
+    const pageKey = button.getAttribute("data-page-key") || "";
+    const page = Math.max(1, Number(button.getAttribute("data-page") || 1));
+    if (!pageKey) return;
+    setUi({
+      tablePages: {
+        ...(getState().ui?.tablePages || {}),
+        [pageKey]: page,
+      },
+    });
+    render();
+    return;
+  }
+
   if (action === "machine-export") {
     exportMachineCsv();
     return;
@@ -907,7 +949,7 @@ document.addEventListener("click", (event) => {
         status: "",
         group: "",
       },
-      machineVisibleLimit: 24,
+      tablePages: { ...(getState().ui?.tablePages || {}), machine: 1 },
     });
     render();
     return;
@@ -920,15 +962,16 @@ document.addEventListener("click", (event) => {
         ...(getState().ui?.machineFilters || {}),
         group,
       },
-      machineVisibleLimit: 24,
+      tablePages: { ...(getState().ui?.tablePages || {}), machine: 1 },
     });
     render();
     return;
   }
 
   if (action === "machine-show-more") {
-    const currentLimit = Number(getState().ui?.machineVisibleLimit || 24);
-    setUi({ machineVisibleLimit: currentLimit + 24 });
+    const ui = getState().ui || {};
+    const currentPage = Number(ui.tablePages?.machine || 1);
+    setUi({ tablePages: { ...(ui.tablePages || {}), machine: currentPage + 1 } });
     render();
     return;
   }
@@ -1568,7 +1611,7 @@ document.addEventListener("change", (event) => {
       })
       .then((count) => {
         if (!count) return;
-        setUi({ machineVisibleLimit: 24 });
+        setUi({ tablePages: { ...(getState().ui?.tablePages || {}), machine: 1 } });
         render();
         alert(`已导入 ${count} 台机台。`);
       })
@@ -1582,6 +1625,26 @@ document.addEventListener("change", (event) => {
   const machineFilter = event.target.closest("[data-machine-filter]");
   if (machineFilter) {
     updateMachineFiltersFromDom();
+    return;
+  }
+
+  const tablePageSize = event.target.closest("[data-table-page-size]");
+  if (tablePageSize) {
+    const pageKey = tablePageSize.getAttribute("data-page-key") || "";
+    if (!pageKey) return;
+    const pageSize = Number(tablePageSize.value || 10);
+    const ui = getState().ui || {};
+    setUi({
+      tablePageSizes: {
+        ...(ui.tablePageSizes || {}),
+        [pageKey]: pageSize,
+      },
+      tablePages: {
+        ...(ui.tablePages || {}),
+        [pageKey]: 1,
+      },
+    });
+    render();
     return;
   }
 

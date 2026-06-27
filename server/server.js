@@ -532,7 +532,7 @@ function normalizeMachineImportRecord(record, index = 0) {
     type,
     name: String(record.name || `${type} ${fallbackPrefix}-${fallbackNo}`).trim(),
     area: String(record.area || (type === "测试机" ? "测试区" : "分选区")).trim(),
-    group: String(record.group || record.productionGroup || record.area || "默认生产组").trim(),
+    group: String(record.group || record.productionGroup || (type === "测试机" ? "测试组" : "分选组")).trim(),
     status: ["运行", "待机", "维护", "故障", "异常"].includes(record.status) ? record.status : "待机",
     job: String(record.job || "等待排产").trim(),
     operator: String(record.operator || "").trim(),
@@ -876,7 +876,7 @@ async function handleApi(req, res, pathname) {
     return;
   }
 
-  const machineMatch = pathname.match(/^\/api\/machines\/([^/]+)$/);
+  const machineMatch = pathname.match(/^\/api\/machines?\/([^/]+)$/);
   if (machineMatch && method === "PATCH") {
     const context = requireUser(req, res, db);
     if (!context) return;

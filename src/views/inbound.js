@@ -562,7 +562,7 @@ export function renderInbound(state, auth) {
           </div>
         </div>
         ${!editable ? `<div class="empty">当前账号没有录入权限，可查看来料单据。</div>` : ""}
-        ${renderTable(columns, filteredInbound)}
+        ${renderTable(columns, filteredInbound, { pageKey: "inbound", ui: state.ui })}
       </section>
 
       ${formOpen ? inboundForm : ""}
