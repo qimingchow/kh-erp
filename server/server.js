@@ -363,21 +363,69 @@ function deleteOutboundRecord(state, id) {
   return { ok: true };
 }
 
-function assignMachineToPlan(state, plan) {
-  if (!plan.machineId) return;
-  const machine = state.machines.find((item) => item.id === plan.machineId);
-  if (!machine) return;
+function productionMachineIds(plan = {}) {
+  const ids = Array.isArray(plan.machineIds) ? plan.machineIds : plan.machineId ? [plan.machineId] : [];
+  return [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))];
+}
 
-  machine.job = `${plan.item} / ${plan.planNo}`;
-  machine.status = plan.status === "已完成" ? "待机" : "运行";
-  machine.progress = Number(plan.progress || 0);
-  machine.updatedAt = timestampText();
+function planMachineJob(plan) {
+  return `${plan.item || "生产任务"} / ${plan.planNo || plan.orderNo || ""}`.trim();
+}
+
+function releasePlanMachine(machine, plan) {
+  if (!machine) return;
+  if (machine.assignedPlanId && machine.assignedPlanId !== plan.id) return;
+  if (!machine.assignedPlanId && !String(machine.job || "").includes(plan.planNo || "")) return;
+  Object.assign(machine, {
+    assignedPlanId: "",
+    job: "等待排产",
+    status: "待机",
+    progress: 0,
+    updatedAt: timestampText(),
+  });
+}
+
+function assignMachineToPlan(state, plan, previousMachineIds = []) {
+  const nextIds = productionMachineIds(plan);
+  const previousIds = [...new Set(previousMachineIds.map((id) => String(id || "").trim()).filter(Boolean))];
+  const nextIdSet = new Set(nextIds);
+
+  previousIds.forEach((machineId) => {
+    if (nextIdSet.has(machineId)) return;
+    releasePlanMachine(state.machines.find((item) => item.id === machineId), plan);
+  });
+
+  plan.machineIds = nextIds;
+  plan.machineId = nextIds[0] || "";
+
+  if (plan.status === "已完成") {
+    nextIds.forEach((machineId) => releasePlanMachine(state.machines.find((item) => item.id === machineId), plan));
+    return;
+  }
+
+  nextIds.forEach((machineId) => {
+    const machine = state.machines.find((item) => item.id === machineId);
+    if (!machine) return;
+    Object.assign(machine, {
+      assignedPlanId: plan.id,
+      job: planMachineJob(plan),
+      status: plan.status === "进行中" || Number(plan.progress || 0) > 0 ? "运行" : "待机",
+      progress: Number(plan.progress || 0),
+      updatedAt: timestampText(),
+    });
+  });
 }
 
 function saveProductionRecord(state, payload) {
   const id = String(payload.id || "").trim();
   const existing = id ? state.production.find((item) => item.id === id) : null;
+  const previousMachineIds = existing ? productionMachineIds(existing) : [];
   const progressStatus = normalizeProductionProgressStatus(payload.status, payload.progress);
+  const machineIds = Array.isArray(payload.machineIds)
+    ? payload.machineIds.map((machineId) => String(machineId || "").trim()).filter(Boolean)
+    : payload.machineId
+      ? [String(payload.machineId).trim()]
+      : [];
   const record = {
     id: existing?.id || makeId("plan"),
     planNo: String(payload.planNo || "").trim(),
@@ -395,7 +443,8 @@ function saveProductionRecord(state, payload) {
     startDate: payload.startDate || payload.orderDate || payload.dueDate || todayText(),
     dueDate: payload.dueDate || todayText(),
     machineGroup: String(payload.machineGroup || payload.group || "").trim(),
-    machineId: String(payload.machineId || "").trim(),
+    machineId: machineIds[0] || "",
+    machineIds,
     priority: payload.priority || "标准",
     status: progressStatus.status,
     progress: progressStatus.progress,
@@ -415,7 +464,7 @@ function saveProductionRecord(state, payload) {
   } else {
     state.production.unshift(record);
   }
-  assignMachineToPlan(state, record);
+  assignMachineToPlan(state, existing || record, previousMachineIds);
   state.ui = { ...(state.ui || {}), productionViewingId: record.id, productionEditingId: null };
   return { ok: true, record };
 }
@@ -471,15 +520,7 @@ function deleteProductionRecord(state, id) {
   if (index < 0) return { ok: false, message: "生产计划不存在。" };
 
   const plan = state.production[index];
-  const machine = state.machines.find((item) => item.id === plan.machineId);
-  if (machine && String(machine.job || "").includes(plan.planNo)) {
-    Object.assign(machine, {
-      job: "等待排产",
-      status: "待机",
-      progress: 0,
-      updatedAt: timestampText(),
-    });
-  }
+  productionMachineIds(plan).forEach((machineId) => releasePlanMachine(state.machines.find((item) => item.id === machineId), plan));
 
   state.production.splice(index, 1);
   if (state.ui?.productionViewingId === id) state.ui.productionViewingId = null;
@@ -497,10 +538,20 @@ function updateMachineRecord(state, machineId, patch) {
     updatedAt: timestampText(),
   });
 
-  const plan = state.production.find((item) => item.machineId === machine.id && item.status !== "已完成");
+  const plan = state.production.find(
+    (item) => item.status !== "已完成" && (item.id === machine.assignedPlanId || productionMachineIds(item).includes(machine.id)),
+  );
   if (plan) {
-    plan.progress = machine.progress;
-    plan.status = machine.progress >= 100 ? "已完成" : machine.status === "运行" ? "进行中" : plan.status;
+    const planMachines = productionMachineIds(plan).map((id) => state.machines.find((item) => item.id === id)).filter(Boolean);
+    const averageProgress = planMachines.length
+      ? Math.round(planMachines.reduce((total, item) => total + Number(item.progress || 0), 0) / planMachines.length)
+      : Number(machine.progress || 0);
+    plan.progress = Math.max(0, Math.min(100, averageProgress));
+    if (planMachines.length && planMachines.every((item) => Number(item.progress || 0) >= 100)) {
+      plan.status = "已完成";
+    } else if (planMachines.some((item) => item.status === "运行" || Number(item.progress || 0) > 0)) {
+      plan.status = "进行中";
+    }
     plan.updatedAt = timestampText();
   }
 
@@ -513,11 +564,14 @@ function deleteMachineRecord(state, machineId) {
 
   state.machines.splice(index, 1);
   state.production.forEach((plan) => {
-    if (plan.machineId !== machineId) return;
-    plan.machineId = "";
+    const existingIds = productionMachineIds(plan);
+    const nextMachineIds = existingIds.filter((id) => id !== machineId);
+    if (nextMachineIds.length === existingIds.length) return;
+    plan.machineIds = nextMachineIds;
+    plan.machineId = nextMachineIds[0] || "";
     plan.note = plan.note
       ? `${plan.note}；原绑定机台已删除，请重新分配。`
-      : "原绑定机台已删除，请重新分配生产组和机台。";
+      : "原绑定机台已删除，请重新分配生产组资源。";
     plan.updatedAt = timestampText();
   });
   return { ok: true };
@@ -532,7 +586,8 @@ function normalizeMachineImportRecord(record, index = 0) {
     type,
     name: String(record.name || `${type} ${fallbackPrefix}-${fallbackNo}`).trim(),
     area: String(record.area || (type === "测试机" ? "测试区" : "分选区")).trim(),
-    group: String(record.group || record.productionGroup || (type === "测试机" ? "测试组" : "分选组")).trim(),
+    group: String(record.group || record.productionGroup || (type === "测试机" ? "测试设备" : "分选设备")).trim(),
+    assignedPlanId: String(record.assignedPlanId || "").trim(),
     status: ["运行", "待机", "维护", "故障", "异常"].includes(record.status) ? record.status : "待机",
     job: String(record.job || "等待排产").trim(),
     operator: String(record.operator || "").trim(),

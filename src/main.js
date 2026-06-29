@@ -352,7 +352,7 @@ function updateMachineFiltersFromDom() {
       keyword: document.querySelector('[data-machine-filter="keyword"]')?.value || "",
       type: document.querySelector('[data-machine-filter="type"]')?.value || "",
       status: document.querySelector('[data-machine-filter="status"]')?.value || "",
-      group: document.querySelector('[data-machine-filter="group"]')?.value || "",
+      planId: document.querySelector('[data-machine-filter="planId"]')?.value || "",
     },
     tablePages: { ...(getState().ui?.tablePages || {}), machine: 1 },
   });
@@ -363,6 +363,29 @@ function updateMachineFiltersFromDom() {
   if (activeSelectionStart !== null && typeof nextActive?.setSelectionRange === "function") {
     nextActive.setSelectionRange(activeSelectionStart, activeSelectionStart);
   }
+}
+
+function updateProductionMachinePoolFilters(panel = document.querySelector(".assignment-panel")) {
+  if (!panel) return;
+  const keyword = String(panel.querySelector('[data-machine-pool-filter="keyword"]')?.value || "").trim().toLowerCase();
+  const status = panel.querySelector('[data-machine-pool-filter="status"]')?.value || "";
+
+  panel.querySelectorAll("[data-machine-option]").forEach((option) => {
+    const matchesKeyword = !keyword || String(option.getAttribute("data-keywords") || "").includes(keyword);
+    const matchesStatus = !status || option.getAttribute("data-status") === status;
+    const visible = matchesKeyword && matchesStatus;
+    option.classList.toggle("is-hidden", !visible);
+    option.classList.toggle("selected", Boolean(option.querySelector('input[name="machineIds"]')?.checked));
+  });
+
+  panel.querySelectorAll(".machine-pool").forEach((pool) => {
+    const visibleCount = [...pool.querySelectorAll("[data-machine-option]")].filter((option) => !option.classList.contains("is-hidden")).length;
+    const selectedCount = pool.querySelectorAll('input[name="machineIds"]:checked').length;
+    const visibleText = pool.querySelector("[data-machine-pool-visible]");
+    const selectedText = pool.querySelector("[data-machine-pool-selected]");
+    if (visibleText) visibleText.textContent = new Intl.NumberFormat("zh-CN").format(visibleCount);
+    if (selectedText) selectedText.textContent = new Intl.NumberFormat("zh-CN").format(selectedCount);
+  });
 }
 
 function render() {
@@ -616,7 +639,8 @@ function buildExcelWorkbook(state) {
         { label: "单价", value: (row) => row.unitPrice },
         { label: "金额", value: (row) => row.amount },
         { label: "交期", value: (row) => row.dueDate },
-        { label: "机台ID", value: (row) => row.machineId },
+        { label: "机台ID列表", value: (row) => (Array.isArray(row.machineIds) ? row.machineIds.join("、") : row.machineId || "") },
+        { label: "机台数量", value: (row) => (Array.isArray(row.machineIds) ? row.machineIds.length : row.machineId ? 1 : 0) },
         { label: "优先级", value: (row) => row.priority },
         { label: "状态", value: (row) => row.status },
         { label: "进度", value: (row) => row.progress },
@@ -699,9 +723,9 @@ function downloadTextFile(filename, content, type = "text/plain;charset=utf-8") 
 
 function machineTemplateCsv() {
   return [
-    "机台ID,机台类型,机台名称,生产组,区域,状态,当前任务,操作员,班次,进度,最近更新",
-    "sorter-001,分选机,分选机 S-001,一组,分选区,待机,等待排产,张工,白班,0,2026-06-24 08:00",
-    "tester-001,测试机,测试机 T-001,一组,测试区,待机,等待排产,李工,白班,0,2026-06-24 08:00",
+    "机台ID,机台类型,机台名称,设备分组,区域,状态,当前任务,操作员,班次,进度,最近更新",
+    "sorter-001,分选机,分选机 S-001,分选设备,分选区,待机,等待排产,张工,白班,0,2026-06-24 08:00",
+    "tester-001,测试机,测试机 T-001,测试设备,测试区,待机,等待排产,李工,白班,0,2026-06-24 08:00",
   ].join("\n");
 }
 
@@ -720,7 +744,7 @@ function exportMachineCsv() {
     machine.updatedAt,
   ]);
   const csv = [
-    "机台ID,机台类型,机台名称,生产组,区域,状态,当前任务,操作员,班次,进度,最近更新",
+    "机台ID,机台类型,机台名称,设备分组,区域,状态,当前任务,操作员,班次,进度,最近更新",
     ...rows.map((row) => row.map((cell) => `"${String(cell ?? "").replaceAll('"', '""')}"`).join(",")),
   ].join("\n");
   downloadTextFile(`坤禾半导体机台清单-${new Date().toISOString().slice(0, 10)}.csv`, `\ufeff${csv}`, "text/csv;charset=utf-8");
@@ -767,7 +791,7 @@ function parseMachineCsv(text) {
     id: findIndex("机台ID", "id", "ID"),
     type: findIndex("机台类型", "类型", "type"),
     name: findIndex("机台名称", "名称", "name"),
-    group: findIndex("生产组", "分组", "group", "productionGroup"),
+    group: findIndex("设备分组", "生产组", "分组", "group", "productionGroup"),
     area: findIndex("区域", "area"),
     status: findIndex("状态", "status"),
     job: findIndex("当前任务", "任务", "job"),
@@ -947,7 +971,7 @@ document.addEventListener("click", (event) => {
         keyword: "",
         type: "",
         status: "",
-        group: "",
+        planId: "",
       },
       tablePages: { ...(getState().ui?.tablePages || {}), machine: 1 },
     });
@@ -955,16 +979,43 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  if (action === "machine-group-filter") {
-    const group = button.getAttribute("data-group") || "";
+  if (action === "machine-plan-filter") {
+    const planId = button.getAttribute("data-plan-id") || "";
     setUi({
       machineFilters: {
         ...(getState().ui?.machineFilters || {}),
-        group,
+        planId,
       },
       tablePages: { ...(getState().ui?.tablePages || {}), machine: 1 },
     });
     render();
+    return;
+  }
+
+  if (action === "machine-pool-filter-reset") {
+    const panel = button.closest(".assignment-panel");
+    panel?.querySelectorAll("[data-machine-pool-filter]").forEach((field) => {
+      field.value = "";
+    });
+    updateProductionMachinePoolFilters(panel);
+    return;
+  }
+
+  if (action === "machine-pool-select-visible") {
+    const pool = button.closest(".machine-pool");
+    pool?.querySelectorAll("[data-machine-option]:not(.is-hidden) input[name='machineIds']:not(:disabled)").forEach((input) => {
+      input.checked = true;
+    });
+    updateProductionMachinePoolFilters(pool?.closest(".assignment-panel"));
+    return;
+  }
+
+  if (action === "machine-pool-clear") {
+    const pool = button.closest(".machine-pool");
+    pool?.querySelectorAll("input[name='machineIds']").forEach((input) => {
+      input.checked = false;
+    });
+    updateProductionMachinePoolFilters(pool?.closest(".assignment-panel"));
     return;
   }
 
@@ -1574,6 +1625,18 @@ document.addEventListener("change", (event) => {
     formatQuantityInput(event.target);
   }
 
+  const machinePoolFilter = event.target.closest("[data-machine-pool-filter]");
+  if (machinePoolFilter) {
+    updateProductionMachinePoolFilters(machinePoolFilter.closest(".assignment-panel"));
+    return;
+  }
+
+  const machinePoolChoice = event.target.closest('input[name="machineIds"]');
+  if (machinePoolChoice) {
+    updateProductionMachinePoolFilters(machinePoolChoice.closest(".assignment-panel"));
+    return;
+  }
+
   const input = event.target.closest('form[data-form="inbound"] input[name="processes"]');
   if (input) {
     syncInboundStandardSections();
@@ -1662,6 +1725,12 @@ document.addEventListener("input", (event) => {
   }
   if (amountForm?.dataset.form === "production" && event.target.name === "progress") {
     syncProductionStatusProgress(amountForm, event.target.name);
+    return;
+  }
+
+  const machinePoolFilter = event.target.closest("[data-machine-pool-filter]");
+  if (machinePoolFilter) {
+    updateProductionMachinePoolFilters(machinePoolFilter.closest(".assignment-panel"));
     return;
   }
 

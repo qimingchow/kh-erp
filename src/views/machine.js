@@ -2,7 +2,7 @@ import { badge, renderTable } from "../ui/components.js";
 import { icon } from "../lib/icons.js";
 import { escapeHtml, formatNumber } from "../lib/format.js";
 import { MACHINE_TYPES } from "../data/seed.js";
-import { getMachineName } from "../domain/actions.js";
+import { productionMachineIds } from "../domain/actions.js";
 import { canEdit } from "../lib/state.js";
 
 function groupMachines(machines) {
@@ -15,26 +15,61 @@ function groupMachines(machines) {
   return grouped;
 }
 
-function machineGroupName(machine = {}) {
-  return machine.group || machine.productionGroup || "未分组";
+function buildPlanMachineIndex(plans = []) {
+  const index = new Map();
+  plans.forEach((plan) => {
+    productionMachineIds(plan).forEach((machineId) => {
+      if (!index.has(machineId)) index.set(machineId, []);
+      index.get(machineId).push(plan);
+    });
+  });
+  return index;
 }
 
-function matchesMachineFilters(machine, filters = {}) {
+function getMachinePlan(planById, machine = {}, planByMachineId = new Map()) {
+  const activePlan = planById.get(machine.assignedPlanId);
+  if (activePlan) return activePlan;
+  const relatedPlans = planByMachineId.get(machine.id) || [];
+  return relatedPlans[relatedPlans.length - 1] || null;
+}
+
+function machineBelongsToPlan(machine, planId, planByMachineId = new Map()) {
+  if (machine.assignedPlanId === planId) return true;
+  return (planByMachineId.get(machine.id) || []).some((plan) => plan.id === planId);
+}
+
+function machinePlanLabel(plan) {
+  if (!plan) return "未绑定计划";
+  return `${plan.planNo || plan.orderNo || "未编号计划"} · ${plan.item || "生产任务"}`;
+}
+
+function machineResourceSummary(state, plan = {}) {
+  const machines = productionMachineIds(plan).map((id) => state.machines.find((machine) => machine.id === id)).filter(Boolean);
+  const sorters = machines.filter((machine) => machine.type === "分选机").length;
+  const testers = machines.filter((machine) => machine.type === "测试机").length;
+  return machines.length ? `${machines.length} 台，分选 ${sorters} / 测试 ${testers}` : "未分配机台";
+}
+
+function matchesMachineFilters(machine, filters = {}, planById = new Map(), planByMachineId = new Map()) {
   const keyword = String(filters.keyword || "").trim().toLowerCase();
   const type = String(filters.type || "");
   const status = String(filters.status || "");
-  const group = String(filters.group || "");
+  const planId = String(filters.planId || "");
+  const plan = getMachinePlan(planById, machine, planByMachineId);
+  const relatedPlans = planByMachineId.get(machine.id) || [];
   const haystack = [
     machine.id,
     machine.type,
     machine.name,
     machine.area,
-    machine.group,
-    machine.productionGroup,
     machine.status,
     machine.job,
     machine.operator,
     machine.shift,
+    plan?.planNo,
+    plan?.orderNo,
+    plan?.item,
+    ...relatedPlans.flatMap((item) => [item.planNo, item.orderNo, item.item, item.status]),
   ]
     .join(" ")
     .toLowerCase();
@@ -42,14 +77,17 @@ function matchesMachineFilters(machine, filters = {}) {
   if (keyword && !haystack.includes(keyword)) return false;
   if (type && machine.type !== type) return false;
   if (status && machine.status !== status) return false;
-  if (group && machineGroupName(machine) !== group) return false;
+  if (planId === "__unassigned__" && machine.assignedPlanId) return false;
+  if (planId && planId !== "__unassigned__" && !machineBelongsToPlan(machine, planId, planByMachineId)) return false;
   return true;
 }
 
 export function renderMachine(state, auth = {}) {
   const editable = canEdit(auth?.currentUser, "machine");
   const filters = state.ui?.machineFilters || {};
-  const filteredMachines = state.machines.filter((machine) => matchesMachineFilters(machine, filters));
+  const planById = new Map((state.production || []).map((plan) => [plan.id, plan]));
+  const planByMachineId = buildPlanMachineIndex(state.production || []);
+  const filteredMachines = state.machines.filter((machine) => matchesMachineFilters(machine, filters, planById, planByMachineId));
   const previewMachines = filteredMachines.slice(0, 24);
   const grouped = groupMachines(previewMachines);
   const orderedTypes = [...MACHINE_TYPES, ...[...grouped.keys()].filter((type) => !MACHINE_TYPES.includes(type))];
@@ -59,7 +97,7 @@ export function renderMachine(state, auth = {}) {
   const maintenanceMachines = filteredMachines.filter((item) => item.status === "维护").length;
   const errorMachines = filteredMachines.filter((item) => item.status === "故障" || item.status === "异常").length;
   const statusTotal = filteredMachines.length || 0;
-  const machineGroups = [...new Set(state.machines.map((machine) => machineGroupName(machine)).filter(Boolean))];
+  const planOptions = state.production || [];
   const statusClass = (status) => {
     if (status === "运行") return "running";
     if (status === "待机") return "standby";
@@ -127,7 +165,7 @@ export function renderMachine(state, auth = {}) {
         <div class="small">${escapeHtml(row.id)} · ${escapeHtml(row.type || "-")}</div>
       `,
     },
-    { label: "生产组", render: (row) => escapeHtml(machineGroupName(row)) },
+    { label: "生产计划", render: (row) => escapeHtml(machinePlanLabel(getMachinePlan(planById, row, planByMachineId))) },
     { label: "区域 / 班次", render: (row) => `${escapeHtml(row.area || "-")}<div class="small">${escapeHtml(row.operator || "-")} · ${escapeHtml(row.shift || "-")}</div>` },
     { label: "状态", render: (row) => badge(row.status) },
     { label: "当前任务", render: (row) => escapeHtml(row.job || "等待排产") },
@@ -154,7 +192,7 @@ export function renderMachine(state, auth = {}) {
     },
   ];
 
-  const activePlans = state.production.filter((item) => item.status === "进行中");
+  const activePlans = state.production.filter((item) => item.status !== "已完成" && productionMachineIds(item).length);
 
   return `
     <div class="page-stack machine-page">
@@ -188,7 +226,7 @@ export function renderMachine(state, auth = {}) {
           <div class="filter-bar compact machine-filter-bar">
             <label class="filter-field">
               <span>快速查找</span>
-              <input type="search" data-machine-filter="keyword" placeholder="机台编号、名称、区域、人员、任务" value="${escapeHtml(filters.keyword || "")}" />
+              <input type="search" data-machine-filter="keyword" placeholder="机台编号、名称、计划号、区域、人员、任务" value="${escapeHtml(filters.keyword || "")}" />
             </label>
             <label class="filter-field">
               <span>机台类型</span>
@@ -205,19 +243,21 @@ export function renderMachine(state, auth = {}) {
               </select>
             </label>
             <label class="filter-field">
-              <span>生产组</span>
-              <select data-machine-filter="group">
-                <option value="">全部生产组</option>
-                ${machineGroups.map((group) => `<option value="${escapeHtml(group)}" ${filters.group === group ? "selected" : ""}>${escapeHtml(group)}</option>`).join("")}
+              <span>生产计划</span>
+              <select data-machine-filter="planId">
+                <option value="">全部计划</option>
+                <option value="__unassigned__" ${filters.planId === "__unassigned__" ? "selected" : ""}>未绑定计划</option>
+                ${planOptions.map((plan) => `<option value="${escapeHtml(plan.id)}" ${filters.planId === plan.id ? "selected" : ""}>${escapeHtml(machinePlanLabel(plan))}</option>`).join("")}
               </select>
             </label>
             <button class="btn ghost" type="button" data-action="machine-filter-reset">重置</button>
           </div>
         </div>
-        <div class="machine-group-strip">
-          <button class="${!filters.group ? "active" : ""}" type="button" data-action="machine-group-filter" data-group="">全部生产组</button>
-          ${machineGroups.slice(0, 10).map((group) => `
-            <button class="${filters.group === group ? "active" : ""}" type="button" data-action="machine-group-filter" data-group="${escapeHtml(group)}">${escapeHtml(group)}</button>
+        <div class="machine-plan-strip">
+          <button class="${!filters.planId ? "active" : ""}" type="button" data-action="machine-plan-filter" data-plan-id="">全部计划</button>
+          <button class="${filters.planId === "__unassigned__" ? "active" : ""}" type="button" data-action="machine-plan-filter" data-plan-id="__unassigned__">未绑定计划</button>
+          ${planOptions.slice(0, 8).map((plan) => `
+            <button class="${filters.planId === plan.id ? "active" : ""}" type="button" data-action="machine-plan-filter" data-plan-id="${escapeHtml(plan.id)}">${escapeHtml(plan.planNo || plan.orderNo || "未编号计划")}</button>
           `).join("")}
         </div>
         <div class="machine-status-grid">
@@ -258,7 +298,7 @@ export function renderMachine(state, auth = {}) {
           <div class="panel-header">
             <div>
               <h3>机台列表</h3>
-              <p>机台数量较多时以列表为主，可按类型、状态、生产组和关键词快速定位。</p>
+              <p>机台数量较多时以列表为主，可按类型、状态、生产计划和关键词快速定位。</p>
             </div>
             <div class="small">共 ${formatNumber(filteredMachines.length)} 台</div>
           </div>
@@ -288,7 +328,7 @@ export function renderMachine(state, auth = {}) {
                     (plan) => `
                       <div class="mini-item">
                         <strong>${escapeHtml(plan.planNo)}</strong>
-                        <div class="small">${escapeHtml(plan.item)} · ${escapeHtml(getMachineName(state, plan.machineId))} · ${formatNumber(plan.progress)}%</div>
+                        <div class="small">${escapeHtml(plan.item)} · ${escapeHtml(machineResourceSummary(state, plan))} · ${formatNumber(plan.progress)}%</div>
                       </div>
                     `,
                   )

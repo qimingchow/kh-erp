@@ -136,12 +136,13 @@ function sortingOtherFromRequirement(value) {
 function normalizeMachineRecord(item, index = 0) {
   const groupIndex = Math.floor(index / 2) + 1;
   const isTest = index % 2 === 1;
-  const defaultGroup = item.type === "测试机" || isTest ? "测试组" : "分选组";
+  const defaultGroup = item.type === "测试机" || isTest ? "测试设备" : "分选设备";
   const existingGroup = item.group && item.group !== item.area ? item.group : "";
   if (item.type) {
     return {
       ...item,
       group: existingGroup || item.productionGroup || defaultGroup,
+      assignedPlanId: item.assignedPlanId || "",
       status: item.status || "待机",
       job: item.job || "等待排产",
       progress: Math.max(0, Math.min(100, Number(item.progress || 0))),
@@ -250,6 +251,11 @@ function normalizeOutboundRecord(item, index = 0, inventory = [], finance = []) 
 function normalizeProductionRecord(item, index = 0) {
   let progress = Math.max(0, Math.min(100, Number(item.progress || 0)));
   let status = item.status || "待排产";
+  const machineIds = Array.isArray(item.machineIds)
+    ? item.machineIds.map((id) => String(id || "").trim()).filter(Boolean)
+    : item.machineId
+      ? [String(item.machineId).trim()]
+      : [];
   if (status === "已完成" || progress >= 100) {
     status = "已完成";
     progress = 100;
@@ -272,7 +278,8 @@ function normalizeProductionRecord(item, index = 0) {
     startDate: item.startDate || item.orderDate || item.createdAt || item.dueDate || todayString(),
     dueDate: item.dueDate || todayString(),
     machineGroup: item.machineGroup || item.group || "",
-    machineId: item.machineId || "",
+    machineId: item.machineId || machineIds[0] || "",
+    machineIds,
     priority: item.priority || "标准",
     status,
     progress,
@@ -297,7 +304,39 @@ function migrateState(raw) {
     ? raw.production.map((item, index) => normalizeProductionRecord(item, index))
     : base.production;
   next.machines = Array.isArray(raw.machines) ? raw.machines.map((item, index) => normalizeMachineRecord(item, index)) : base.machines;
+  reconcileMachineAssignments(next);
   return next;
+}
+
+function reconcileMachineAssignments(next) {
+  const activeMachineIds = new Set();
+  next.production.forEach((plan) => {
+    const ids = Array.isArray(plan.machineIds) ? plan.machineIds : plan.machineId ? [plan.machineId] : [];
+    plan.machineIds = [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))];
+    plan.machineId = plan.machineIds[0] || "";
+    if (plan.status === "已完成") return;
+    plan.machineIds.forEach((machineId) => {
+      const machine = next.machines.find((item) => item.id === machineId);
+      if (!machine) return;
+      activeMachineIds.add(machine.id);
+      machine.assignedPlanId = plan.id;
+      machine.job = `${plan.item || "生产任务"} / ${plan.planNo || plan.orderNo || ""}`.trim();
+      machine.status = plan.status === "进行中" || Number(plan.progress || 0) > 0 ? "运行" : "待机";
+      machine.progress = Number(plan.progress || 0);
+      machine.updatedAt = machine.updatedAt || plan.updatedAt || todayString();
+    });
+  });
+
+  next.machines.forEach((machine) => {
+    if (!machine.assignedPlanId || activeMachineIds.has(machine.id)) return;
+    const plan = next.production.find((item) => item.id === machine.assignedPlanId);
+    if (!plan || plan.status === "已完成") {
+      machine.assignedPlanId = "";
+      machine.job = "等待排产";
+      machine.status = "待机";
+      machine.progress = 0;
+    }
+  });
 }
 
 function loadAuth() {

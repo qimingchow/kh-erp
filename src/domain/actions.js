@@ -344,21 +344,64 @@ export function deleteOutbound(state, id) {
   return { ok: true };
 }
 
-export function assignMachineToPlan(state, plan) {
-  if (!plan.machineId) return;
-  const machine = state.machines.find((item) => item.id === plan.machineId);
-  if (!machine) return;
+export function productionMachineIds(plan = {}) {
+  const ids = Array.isArray(plan.machineIds) ? plan.machineIds : plan.machineId ? [plan.machineId] : [];
+  return [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))];
+}
 
-  machine.job = `${plan.item} / ${plan.planNo}`;
-  machine.status = plan.status === "已完成" ? "待机" : "运行";
-  machine.progress = plan.progress;
-  machine.updatedAt = timestampNow();
+function planMachineJob(plan) {
+  return `${plan.item || "生产任务"} / ${plan.planNo || plan.orderNo || ""}`.trim();
+}
+
+function releasePlanMachine(machine, plan) {
+  if (!machine) return;
+  if (machine.assignedPlanId && machine.assignedPlanId !== plan.id) return;
+  if (!machine.assignedPlanId && !String(machine.job || "").includes(plan.planNo || "")) return;
+  Object.assign(machine, {
+    assignedPlanId: "",
+    job: "等待排产",
+    status: "待机",
+    progress: 0,
+    updatedAt: timestampNow(),
+  });
+}
+
+export function assignMachineToPlan(state, plan, previousMachineIds = []) {
+  const nextIds = productionMachineIds(plan);
+  const previousIds = [...new Set(previousMachineIds.map((id) => String(id || "").trim()).filter(Boolean))];
+  const nextIdSet = new Set(nextIds);
+
+  previousIds.forEach((machineId) => {
+    if (nextIdSet.has(machineId)) return;
+    releasePlanMachine(state.machines.find((item) => item.id === machineId), plan);
+  });
+
+  plan.machineIds = nextIds;
+  plan.machineId = nextIds[0] || "";
+
+  if (plan.status === "已完成") {
+    nextIds.forEach((machineId) => releasePlanMachine(state.machines.find((item) => item.id === machineId), plan));
+    return;
+  }
+
+  nextIds.forEach((machineId) => {
+    const machine = state.machines.find((item) => item.id === machineId);
+    if (!machine) return;
+    Object.assign(machine, {
+      assignedPlanId: plan.id,
+      job: planMachineJob(plan),
+      status: plan.status === "进行中" || Number(plan.progress || 0) > 0 ? "运行" : "待机",
+      progress: Number(plan.progress || 0),
+      updatedAt: timestampNow(),
+    });
+  });
 }
 
 export function createProduction(state, formData) {
   const id = String(formData.get("id") || "").trim();
   const record = productionRecordFromForm(formData, id);
   const existing = id ? state.production.find((item) => item.id === id) : null;
+  const previousMachineIds = existing ? productionMachineIds(existing) : [];
   if (existing) {
     record.inventoryId = existing.inventoryId || record.inventoryId;
     record.stockedQty = Number(existing.stockedQty || record.stockedQty || 0);
@@ -370,7 +413,7 @@ export function createProduction(state, formData) {
   } else {
     state.production.unshift(record);
   }
-  assignMachineToPlan(state, record);
+  assignMachineToPlan(state, existing || record, previousMachineIds);
   state.ui = {
     ...(state.ui || {}),
     productionEditingId: null,
@@ -384,6 +427,9 @@ export function productionRecordFromForm(formData, existingId = "") {
   const unitPrice = parseNumber(formData.get("unitPrice"));
   const manualAmount = parseNumber(formData.get("amount"));
   const progressStatus = normalizeProductionProgressStatus(formData.get("status"), formData.get("progress"));
+  const machineIds = formData.getAll("machineIds").map((id) => String(id || "").trim()).filter(Boolean);
+  const fallbackMachineId = String(formData.get("machineId") || "").trim();
+  if (!machineIds.length && fallbackMachineId) machineIds.push(fallbackMachineId);
   return {
     id: existingId || String(formData.get("id") || "").trim() || makeId("plan"),
     planNo: formData.get("planNo"),
@@ -396,7 +442,8 @@ export function productionRecordFromForm(formData, existingId = "") {
     startDate: formData.get("startDate") || new Date().toISOString().slice(0, 10),
     dueDate: formData.get("dueDate"),
     machineGroup: formData.get("machineGroup") || "",
-    machineId: formData.get("machineId"),
+    machineId: machineIds[0] || "",
+    machineIds,
     priority: formData.get("priority"),
     status: progressStatus.status,
     progress: progressStatus.progress,
@@ -462,15 +509,7 @@ export function deleteProduction(state, id) {
   const index = state.production.findIndex((item) => item.id === id);
   if (index < 0) return { ok: false, message: "生产计划不存在" };
   const plan = state.production[index];
-  const machine = state.machines.find((item) => item.id === plan.machineId);
-  if (machine && String(machine.job || "").includes(plan.planNo)) {
-    Object.assign(machine, {
-      job: "等待排产",
-      status: "待机",
-      progress: 0,
-      updatedAt: timestampNow(),
-    });
-  }
+  productionMachineIds(plan).forEach((machineId) => releasePlanMachine(state.machines.find((item) => item.id === machineId), plan));
   state.production.splice(index, 1);
   if (state.ui?.productionEditingId === id) state.ui.productionEditingId = null;
   if (state.ui?.productionViewingId === id) state.ui.productionViewingId = null;
@@ -591,11 +630,22 @@ export function updateMachine(state, machineId, patch) {
 
   state.machines[index] = { ...state.machines[index], ...patch };
   const machine = state.machines[index];
-  const plan = state.production.find((item) => item.machineId === machine.id && item.status !== "已完成");
+  const plan = state.production.find(
+    (item) => item.status !== "已完成" && (item.id === machine.assignedPlanId || productionMachineIds(item).includes(machine.id)),
+  );
 
   if (plan) {
-    plan.progress = machine.progress;
-    plan.status = machine.progress >= 100 ? "已完成" : machine.status === "运行" ? "进行中" : plan.status;
+    const planMachines = productionMachineIds(plan).map((id) => state.machines.find((item) => item.id === id)).filter(Boolean);
+    const averageProgress = planMachines.length
+      ? Math.round(planMachines.reduce((total, item) => total + Number(item.progress || 0), 0) / planMachines.length)
+      : Number(machine.progress || 0);
+    plan.progress = Math.max(0, Math.min(100, averageProgress));
+    if (planMachines.length && planMachines.every((item) => Number(item.progress || 0) >= 100)) {
+      plan.status = "已完成";
+    } else if (planMachines.some((item) => item.status === "运行" || Number(item.progress || 0) > 0)) {
+      plan.status = "进行中";
+    }
+    plan.updatedAt = timestampNow();
   }
 
   return { ok: true };
@@ -607,10 +657,12 @@ export function deleteMachine(state, machineId) {
 
   state.machines.splice(index, 1);
   state.production.forEach((plan) => {
-    if (plan.machineId !== machineId) return;
-    plan.machineId = "";
+    const nextMachineIds = productionMachineIds(plan).filter((id) => id !== machineId);
+    if (nextMachineIds.length === productionMachineIds(plan).length) return;
+    plan.machineIds = nextMachineIds;
+    plan.machineId = nextMachineIds[0] || "";
     if (!plan.note) {
-      plan.note = "原绑定机台已删除，请重新分配生产组和机台。";
+      plan.note = "原绑定机台已删除，请重新分配生产组资源。";
     } else if (!String(plan.note).includes("原绑定机台已删除")) {
       plan.note = `${plan.note}；原绑定机台已删除，请重新分配。`;
     }
@@ -628,7 +680,8 @@ function normalizeMachineImportRecord(record, index = 0) {
     type,
     name: String(record.name || `${type} ${fallbackPrefix}-${fallbackNo}`).trim(),
     area: String(record.area || (type === "测试机" ? "测试区" : "分选区")).trim(),
-    group: String(record.group || record.productionGroup || (type === "测试机" ? "测试组" : "分选组")).trim(),
+    group: String(record.group || record.productionGroup || (type === "测试机" ? "测试设备" : "分选设备")).trim(),
+    assignedPlanId: String(record.assignedPlanId || "").trim(),
     status: ["运行", "待机", "维护", "故障", "异常"].includes(record.status) ? record.status : "待机",
     job: String(record.job || "等待排产").trim(),
     operator: String(record.operator || "").trim(),

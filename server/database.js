@@ -74,12 +74,57 @@ function normalizeUser(user, index = 0) {
 
 function normalizeDb(raw = {}) {
   const users = Array.isArray(raw.users) && raw.users.length ? raw.users : USER_SEED.users;
+  const state = normalizeState({ ...clone(SEED_STATE), ...(raw.state || {}) });
   return {
     version: 1,
-    state: { ...clone(SEED_STATE), ...(raw.state || {}) },
+    state,
     users: users.map(normalizeUser),
     sessions: Array.isArray(raw.sessions) ? raw.sessions : [],
   };
+}
+
+function productionMachineIds(plan = {}) {
+  const ids = Array.isArray(plan.machineIds) ? plan.machineIds : plan.machineId ? [plan.machineId] : [];
+  return [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))];
+}
+
+function normalizeState(state) {
+  state.production = Array.isArray(state.production) ? state.production : [];
+  state.machines = Array.isArray(state.machines) ? state.machines : [];
+  state.production.forEach((plan) => {
+    plan.machineIds = productionMachineIds(plan);
+    plan.machineId = plan.machineIds[0] || "";
+  });
+  reconcileMachineAssignments(state);
+  return state;
+}
+
+function reconcileMachineAssignments(state) {
+  const activeMachineIds = new Set();
+  state.production.forEach((plan) => {
+    if (plan.status === "已完成") return;
+    productionMachineIds(plan).forEach((machineId) => {
+      const machine = state.machines.find((item) => item.id === machineId);
+      if (!machine) return;
+      activeMachineIds.add(machine.id);
+      machine.assignedPlanId = plan.id;
+      machine.job = `${plan.item || "生产任务"} / ${plan.planNo || plan.orderNo || ""}`.trim();
+      machine.status = plan.status === "进行中" || Number(plan.progress || 0) > 0 ? "运行" : "待机";
+      machine.progress = Number(plan.progress || 0);
+      machine.updatedAt = machine.updatedAt || plan.updatedAt || todayText();
+    });
+  });
+
+  state.machines.forEach((machine) => {
+    if (!machine.assignedPlanId || activeMachineIds.has(machine.id)) return;
+    const plan = state.production.find((item) => item.id === machine.assignedPlanId);
+    if (!plan || plan.status === "已完成") {
+      machine.assignedPlanId = "";
+      machine.job = "等待排产";
+      machine.status = "待机";
+      machine.progress = 0;
+    }
+  });
 }
 
 function initialDb() {

@@ -1,16 +1,12 @@
 import { badge, renderField, renderTable } from "../ui/components.js";
 import { icon } from "../lib/icons.js";
 import { escapeHtml, formatCurrency, formatDate, formatNumber } from "../lib/format.js";
-import { getMachineName } from "../domain/actions.js";
+import { getMachineName, productionMachineIds } from "../domain/actions.js";
 import { canEdit } from "../lib/state.js";
-
-function machineGroupName(machine = {}) {
-  return machine.group || machine.productionGroup || "未分组";
-}
 
 function defaultProductionValues(record = {}, draftInbound = null, state = { machines: [] }) {
   const current = record || {};
-  const currentMachine = state.machines.find((machine) => machine.id === current.machineId);
+  const machineIds = productionMachineIds(current);
   const draftPlanNo = draftInbound
     ? `PL-${String(draftInbound.orderDate || draftInbound.date || new Date().toISOString().slice(0, 10)).replaceAll("-", "")}-${String((draftInbound.id || "").split("-").pop() || "001").padStart(3, "0")}`
     : "";
@@ -25,8 +21,9 @@ function defaultProductionValues(record = {}, draftInbound = null, state = { mac
     amount: current.amount ?? draftInbound?.amount ?? "",
     startDate: current.startDate || draftInbound?.orderDate || draftInbound?.date || new Date().toISOString().slice(0, 10),
     dueDate: current.dueDate || draftInbound?.deliveryDate || new Date().toISOString().slice(0, 10),
-    machineGroup: current.machineGroup || (currentMachine ? machineGroupName(currentMachine) : ""),
-    machineId: current.machineId || "",
+    machineGroup: current.machineGroup || "",
+    machineId: machineIds[0] || "",
+    machineIds,
     priority: current.priority || "标准",
     status: current.status || "待排产",
     progress: current.progress ?? 0,
@@ -54,15 +51,6 @@ export function renderProduction(state, auth = {}) {
   const overduePlans = state.production.filter((item) => item.status !== "已完成" && item.dueDate < new Date().toISOString().slice(0, 10)).length;
   const formOpen = Boolean(editable && (state.ui?.productionFormOpen || formRecord || draftInbound));
   const formTitle = formRecord ? "编辑生产计划" : draftInbound ? "由来料生成生产计划" : "新增生产计划";
-  const machineOptions = state.machines.map((item) => ({
-    value: item.id,
-    label: `${item.type} · ${item.name} · ${item.area} · ${item.status}`,
-  }));
-  const machineGroups = [...new Set(state.machines.map((machine) => machineGroupName(machine)).filter(Boolean))];
-  const machineGroupOptions = [
-    { label: "未分组", value: "" },
-    ...machineGroups.map((group) => ({ label: group, value: group })),
-  ];
   const ganttWindow = createGanttWindow(state, selectedRecord);
 
   const fields = [
@@ -77,18 +65,10 @@ export function renderProduction(state, auth = {}) {
     { name: "dueDate", label: "交期", type: "date", defaultValue: new Date().toISOString().slice(0, 10) },
     {
       name: "machineGroup",
-      label: "生产组",
-      type: "select",
-      options: machineGroupOptions,
+      label: "生产组名称",
+      placeholder: "例如：A线-白班 / 临时10+10组",
       defaultValue: "",
       required: false,
-    },
-    {
-      name: "machineId",
-      label: "机台",
-      type: "select",
-      options: machineOptions,
-      defaultValue: machineOptions[0]?.value || "",
     },
     {
       name: "priority",
@@ -121,7 +101,7 @@ export function renderProduction(state, auth = {}) {
     { label: "计划号", render: (row) => escapeHtml(row.planNo) },
     { label: "订单", render: (row) => escapeHtml(row.orderNo) },
     { label: "物料", render: (row) => `${escapeHtml(row.item)}<div class="small">${formatNumber(row.qty)} ${escapeHtml(row.unit || "K")}</div>` },
-    { label: "生产组 / 机台", render: (row) => `${escapeHtml(row.machineGroup || "-")}<div class="small">${escapeHtml(getMachineName(state, row.machineId))}</div>` },
+    { label: "生产组 / 资源", render: (row) => `${escapeHtml(row.machineGroup || "未命名生产组")}<div class="small">${escapeHtml(machineAssignmentSummary(state, row))}</div>` },
     { label: "计划开始", render: (row) => escapeHtml(formatDate(row.startDate)) },
     { label: "交期", render: (row) => escapeHtml(formatDate(row.dueDate)) },
     { label: "优先级", render: (row) => `<span class="priority-pill ${priorityClass(row.priority)}">${escapeHtml(priorityLabel(row.priority))}</span>` },
@@ -227,6 +207,7 @@ export function renderProduction(state, auth = {}) {
             <div class="field-grid">
               ${fields.map((field) => renderField(field, values[field.name])).join("")}
             </div>
+            ${renderMachineAssignmentPicker(state, values)}
             <div class="form-actions">
               <button class="btn primary" type="submit">${formRecord ? "保存修改" : "保存计划"}</button>
               <button class="btn ghost" type="button" data-action="production-cancel">${formRecord ? "取消编辑" : "收起表单"}</button>
@@ -244,7 +225,7 @@ export function renderProduction(state, auth = {}) {
         </div>
         <div class="capacity-grid">
           ${state.machines.map((machine, index) => {
-            const plan = state.production.find((item) => item.machineId === machine.id && item.status !== "已完成");
+            const plan = state.production.find((item) => productionMachineIds(item).includes(machine.id) && item.status !== "已完成");
             const load = Math.max(10, Math.min(96, Number(plan?.progress || machine.progress || 0) + (index % 3) * 8));
             return `
               <div class="capacity-card ${load > 80 ? "hot" : machine.status === "待机" ? "idle" : ""}">
@@ -311,6 +292,125 @@ function productionStockStatus(plan) {
   return `<span class="badge neutral">未完成</span>`;
 }
 
+function machineTypeCounts(state, planOrIds) {
+  const ids = Array.isArray(planOrIds) ? planOrIds : productionMachineIds(planOrIds);
+  const machines = ids.map((id) => state.machines.find((machine) => machine.id === id)).filter(Boolean);
+  return {
+    total: machines.length,
+    sorter: machines.filter((machine) => machine.type === "分选机").length,
+    tester: machines.filter((machine) => machine.type === "测试机").length,
+  };
+}
+
+function machineAssignmentSummary(state, planOrIds) {
+  const counts = machineTypeCounts(state, planOrIds);
+  if (!counts.total) return "未分配机台";
+  return `${counts.total} 台：分选机 ${counts.sorter} 台 / 测试机 ${counts.tester} 台`;
+}
+
+function machineAssignmentNames(state, planOrIds) {
+  const ids = Array.isArray(planOrIds) ? planOrIds : productionMachineIds(planOrIds);
+  const names = ids.map((id) => getMachineName(state, id)).filter((name) => name && name !== "未指定");
+  if (!names.length) return "未分配";
+  if (names.length <= 8) return names.join("、");
+  return `${names.slice(0, 8).join("、")} 等 ${names.length} 台`;
+}
+
+function renderMachineAssignmentPicker(state, values) {
+  const selectedIds = new Set(values.machineIds || []);
+  const plans = state.production || [];
+  const planById = new Map(plans.map((plan) => [plan.id, plan]));
+  const sorters = state.machines.filter((machine) => machine.type === "分选机");
+  const testers = state.machines.filter((machine) => machine.type === "测试机");
+  const counts = machineTypeCounts(state, [...selectedIds]);
+
+  return `
+    <section class="assignment-panel">
+      <div class="assignment-head">
+        <div>
+          <h4>生产资源分配</h4>
+          <p>一个生产组可以同时绑定多台测试机和多台分选机，保存后会同步更新机台看板当前任务。</p>
+        </div>
+        <div class="assignment-summary">
+          <strong>已选 ${formatNumber(counts.total)} 台</strong>
+          <span>分选 ${formatNumber(counts.sorter)} / 测试 ${formatNumber(counts.tester)}</span>
+        </div>
+      </div>
+      <div class="assignment-filter-bar">
+        <label class="filter-field">
+          <span>快速查找机台</span>
+          <input type="search" data-machine-pool-filter="keyword" placeholder="机台编号、名称、区域、人员、任务" />
+        </label>
+        <label class="filter-field compact">
+          <span>状态</span>
+          <select data-machine-pool-filter="status">
+            <option value="">全部状态</option>
+            ${["待机", "运行", "维护", "故障", "异常"].map((status) => `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`).join("")}
+          </select>
+        </label>
+        <button class="btn ghost" type="button" data-action="machine-pool-filter-reset">重置</button>
+      </div>
+      <div class="assignment-columns">
+        ${renderMachinePool("分选机", sorters, selectedIds, planById)}
+        ${renderMachinePool("测试机", testers, selectedIds, planById)}
+      </div>
+    </section>
+  `;
+}
+
+function renderMachinePool(title, machines, selectedIds, planById = new Map()) {
+  const isLocked = (machine) => {
+    if (selectedIds.has(machine.id) || !machine.assignedPlanId) return false;
+    const plan = planById.get(machine.assignedPlanId);
+    return Boolean(plan && plan.status !== "已完成");
+  };
+  const selectedMachines = machines.filter((machine) => selectedIds.has(machine.id));
+  const idleMachines = machines.filter((machine) => !selectedIds.has(machine.id) && !isLocked(machine) && machine.status === "待机");
+  const otherMachines = machines.filter((machine) => !selectedIds.has(machine.id) && !isLocked(machine) && machine.status !== "待机");
+  const lockedMachines = machines.filter((machine) => isLocked(machine));
+  const visibleMachines = [...selectedMachines, ...idleMachines, ...otherMachines, ...lockedMachines];
+  return `
+    <div class="machine-pool">
+      <div class="machine-pool-head">
+        <strong>${escapeHtml(title)}</strong>
+        <span>当前 <b data-machine-pool-visible>${formatNumber(machines.length)}</b> / ${formatNumber(machines.length)} 台，已选 <b data-machine-pool-selected>${formatNumber(selectedMachines.length)}</b> 台</span>
+      </div>
+      <div class="machine-pool-actions">
+        <button class="btn mini" type="button" data-action="machine-pool-select-visible">勾选当前筛选</button>
+        <button class="btn mini" type="button" data-action="machine-pool-clear">清空本组选择</button>
+      </div>
+      <div class="machine-check-list">
+        ${
+          visibleMachines.length
+            ? visibleMachines.map((machine) => {
+              const locked = isLocked(machine);
+              const lockedPlan = locked ? planById.get(machine.assignedPlanId) : null;
+              const meta = locked
+                ? `已占用：${lockedPlan?.planNo || lockedPlan?.orderNo || "其他计划"}`
+                : `${machine.area || "-"} · ${machine.status || "-"} · ${machine.job || "等待排产"}`;
+              return `
+              <label
+                class="machine-check ${selectedIds.has(machine.id) ? "selected" : ""} ${locked ? "locked" : ""}"
+                data-machine-option
+                data-status="${escapeHtml(machine.status || "")}"
+                data-keywords="${escapeHtml([machine.id, machine.type, machine.name, machine.area, machine.operator, machine.shift, machine.status, machine.job, lockedPlan?.planNo, lockedPlan?.orderNo, lockedPlan?.item].join(" ").toLowerCase())}"
+              >
+                <input type="checkbox" name="machineIds" value="${escapeHtml(machine.id)}" ${selectedIds.has(machine.id) ? "checked" : ""} ${locked ? "disabled" : ""} />
+                <span>
+                  <strong>${escapeHtml(machine.name)}</strong>
+                  <small>${escapeHtml(meta)}</small>
+                </span>
+              </label>
+            `;
+            }).join("")
+            : `<div class="empty compact">暂无可选${escapeHtml(title)}。</div>`
+        }
+      </div>
+      <div class="small">支持全量机台内快速搜索；批量勾选前建议先按关键词或状态缩小范围。</div>
+    </div>
+  `;
+}
+
 function renderProductionDetail(plan, state, editable) {
   return `
     <section class="panel" id="production-detail-panel">
@@ -329,8 +429,9 @@ function renderProductionDetail(plan, state, editable) {
         ${detailItem("关联订单", plan.orderNo || "-")}
         ${detailItem("生产物料", plan.item)}
         ${detailItem("计划数量", `${formatNumber(plan.qty)} ${plan.unit || "K"}`)}
-        ${detailItem("生产组", plan.machineGroup || "-")}
-        ${detailItem("机台", getMachineName(state, plan.machineId))}
+        ${detailItem("生产组", plan.machineGroup || "未命名生产组")}
+        ${detailItem("机台资源", machineAssignmentSummary(state, plan))}
+        ${detailItem("已选机台", machineAssignmentNames(state, plan))}
         ${detailItem("计划开始", formatDate(plan.startDate))}
         ${detailItem("交期", formatDate(plan.dueDate))}
         ${detailItem("优先级", priorityLabel(plan.priority))}
