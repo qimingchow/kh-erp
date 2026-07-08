@@ -323,23 +323,33 @@ function renderMachineAssignmentPicker(state, values) {
   const sorters = state.machines.filter((machine) => machine.type === "分选机");
   const testers = state.machines.filter((machine) => machine.type === "测试机");
   const counts = machineTypeCounts(state, [...selectedIds]);
+  const activeType = counts.tester > 0 && counts.sorter === 0 ? "测试机" : "分选机";
 
   return `
-    <section class="assignment-panel">
+    <section class="assignment-panel" data-active-machine-pool="${escapeHtml(activeType)}">
       <div class="assignment-head">
         <div>
           <h4>生产资源分配</h4>
-          <p>一个生产组可以同时绑定多台测试机和多台分选机，保存后会同步更新机台看板当前任务。</p>
+          <p>先选择机台大类，再在该大类下多选机台；一个生产组可以同时包含多台测试机和多台分选机。</p>
         </div>
         <div class="assignment-summary">
           <strong>已选 ${formatNumber(counts.total)} 台</strong>
           <span>分选 ${formatNumber(counts.sorter)} / 测试 ${formatNumber(counts.tester)}</span>
         </div>
       </div>
+      <div class="machine-pool-tabs" role="tablist" aria-label="机台大类">
+        ${["分选机", "测试机"].map((type) => `
+          <button class="btn mini ${activeType === type ? "primary" : ""}" type="button" data-action="machine-pool-type" data-type="${escapeHtml(type)}">
+            ${escapeHtml(type)}
+            <span>${formatNumber(type === "分选机" ? sorters.length : testers.length)} 台</span>
+            <b>${formatNumber(type === "分选机" ? counts.sorter : counts.tester)} 已选</b>
+          </button>
+        `).join("")}
+      </div>
       <div class="assignment-filter-bar">
         <label class="filter-field">
           <span>快速查找机台</span>
-          <input type="search" data-machine-pool-filter="keyword" placeholder="机台编号、名称、区域、人员、任务" />
+          <input type="search" data-machine-pool-filter="keyword" placeholder="机台编号、名称、区域、人员、任务、生产计划" />
         </label>
         <label class="filter-field compact">
           <span>状态</span>
@@ -350,15 +360,15 @@ function renderMachineAssignmentPicker(state, values) {
         </label>
         <button class="btn ghost" type="button" data-action="machine-pool-filter-reset">重置</button>
       </div>
-      <div class="assignment-columns">
-        ${renderMachinePool("分选机", sorters, selectedIds, planById)}
-        ${renderMachinePool("测试机", testers, selectedIds, planById)}
+      <div class="assignment-single">
+        ${renderMachinePool("分选机", sorters, selectedIds, planById, activeType)}
+        ${renderMachinePool("测试机", testers, selectedIds, planById, activeType)}
       </div>
     </section>
   `;
 }
 
-function renderMachinePool(title, machines, selectedIds, planById = new Map()) {
+function renderMachinePool(title, machines, selectedIds, planById = new Map(), activeType = "分选机") {
   const isLocked = (machine) => {
     if (selectedIds.has(machine.id) || !machine.assignedPlanId) return false;
     const plan = planById.get(machine.assignedPlanId);
@@ -370,7 +380,7 @@ function renderMachinePool(title, machines, selectedIds, planById = new Map()) {
   const lockedMachines = machines.filter((machine) => isLocked(machine));
   const visibleMachines = [...selectedMachines, ...idleMachines, ...otherMachines, ...lockedMachines];
   return `
-    <div class="machine-pool">
+    <div class="machine-pool" data-machine-pool-type="${escapeHtml(title)}" ${activeType === title ? "" : "hidden"}>
       <div class="machine-pool-head">
         <strong>${escapeHtml(title)}</strong>
         <span>当前 <b data-machine-pool-visible>${formatNumber(machines.length)}</b> / ${formatNumber(machines.length)} 台，已选 <b data-machine-pool-selected>${formatNumber(selectedMachines.length)}</b> 台</span>

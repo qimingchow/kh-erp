@@ -11,6 +11,14 @@ BACKUP_DIR="$APP_DIR/backups"
 
 cd "$APP_DIR"
 
+if [[ -f "$APP_DIR/.env" ]]; then
+  echo "0. Loading environment from .env..."
+  set -a
+  # shellcheck disable=SC1091
+  source "$APP_DIR/.env"
+  set +a
+fi
+
 echo "1. Checking server tools..."
 for cmd in git npm curl; do
   command -v "$cmd" >/dev/null 2>&1 || {

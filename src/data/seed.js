@@ -11,6 +11,7 @@ export const RESOURCE_LABELS = {
   outbound: "出库记录",
   production: "生产计划",
   machine: "机台看板",
+  machineStats: "机台统计",
   finance: "财务记录",
 };
 
@@ -66,6 +67,22 @@ export const SEED_STATE = {
       type: "",
       status: "",
     },
+    machineRunFilters: {
+      date: "",
+      shift: "",
+      machineType: "",
+      keyword: "",
+    },
+    machineDataFileFilters: {
+      machineType: "",
+      machineKeyword: "",
+      ext: "",
+      status: "",
+      modifiedFrom: "",
+      modifiedTo: "",
+    },
+    machineDataFiles: [],
+    machineDataFilesLoaded: false,
     financeEditingId: null,
     financeViewingId: null,
     financeFormOpen: false,
@@ -74,6 +91,19 @@ export const SEED_STATE = {
     userEditingId: null,
     userViewingId: null,
   },
+  machineDataConfig: {
+    nasPath: "",
+    testerDir: "测试机",
+    sorterDir: "分选机",
+    testerDataDir: "测试档",
+    sorterDataDir: "CN",
+    dayShiftStart: "08:00",
+    nightShiftStart: "20:00",
+    lastScanAt: "",
+  },
+  machineDataFiles: [],
+  machineRuns: [],
+  machineDataLogs: [],
   inbound: [
     {
       id: "in-001",

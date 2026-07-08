@@ -978,6 +978,26 @@ button {
   font-size: 12px;
 }
 
+.machine-pool-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.machine-pool-tabs .btn {
+  justify-content: space-between;
+  min-height: 46px;
+}
+
+.machine-pool-tabs span,
+.machine-pool-tabs b {
+  font-size: 12px;
+}
+
+.machine-pool-tabs b {
+  color: inherit;
+}
+
 .assignment-filter-bar {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) 150px auto;
@@ -991,6 +1011,11 @@ button {
   gap: 12px;
 }
 
+.assignment-single {
+  display: grid;
+  gap: 12px;
+}
+
 .machine-pool {
   min-width: 0;
   display: grid;
@@ -999,6 +1024,10 @@ button {
   border-radius: 12px;
   background: #fff;
   padding: 12px;
+}
+
+.machine-pool[hidden] {
+  display: none;
 }
 
 .machine-pool-head {
@@ -1082,6 +1111,36 @@ button {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.4;
+}
+
+.machine-data-config {
+  display: grid;
+  grid-template-columns: minmax(260px, 2fr) repeat(4, minmax(120px, 1fr)) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.machine-data-config .field.full {
+  grid-column: auto;
+}
+
+.machine-data-note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.machine-data-note span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f8fafc;
+  padding: 6px 10px;
+}
+
+.machine-stats-page .stats-grid.compact-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .field.row {
@@ -2960,6 +3019,11 @@ tr:hover td {
     grid-template-columns: 1fr;
   }
 
+  .machine-data-config,
+  .machine-stats-page .stats-grid.compact-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .machine-header-actions {
     justify-content: flex-start;
     width: 100%;
@@ -3241,6 +3305,11 @@ tr:hover td {
 
   .machine-actions button {
     flex: 1 1 72px;
+  }
+
+  .machine-data-config,
+  .machine-stats-page .stats-grid.compact-stats {
+    grid-template-columns: 1fr;
   }
 }
 

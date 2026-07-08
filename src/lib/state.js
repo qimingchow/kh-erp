@@ -291,6 +291,85 @@ function normalizeProductionRecord(item, index = 0) {
   };
 }
 
+function normalizeMachineDataConfig(config = {}) {
+  return {
+    nasPath: String(config.nasPath || "").trim(),
+    testerDir: String(config.testerDir || "测试机").trim() || "测试机",
+    sorterDir: String(config.sorterDir || "分选机").trim() || "分选机",
+    testerDataDir: String(config.testerDataDir || "测试档").trim(),
+    sorterDataDir: String(config.sorterDataDir || "CN").trim(),
+    dayShiftStart: config.dayShiftStart || "08:00",
+    nightShiftStart: config.nightShiftStart || "20:00",
+    lastScanAt: config.lastScanAt || "",
+  };
+}
+
+function normalizeMachineRun(item = {}, index = 0) {
+  const inputQty = Number(item.inputQty || 0);
+  const goodQty = Number(item.goodQty || 0);
+  const ngQty = Number(item.ngQty || 0);
+  const outputQty = Number(item.outputQty || goodQty + ngQty || inputQty || 0);
+  const yieldRate = item.yieldRate !== undefined && item.yieldRate !== "" ? Number(item.yieldRate || 0) : inputQty ? Number(((goodQty / inputQty) * 100).toFixed(2)) : 0;
+  return {
+    id: item.id || `run-${String(index + 1).padStart(3, "0")}`,
+    machineId: item.machineId || "",
+    machineName: item.machineName || item.machineId || "",
+    machineType: item.machineType || "",
+    planId: item.planId || "",
+    planNo: item.planNo || "",
+    orderNo: item.orderNo || "",
+    batchNo: item.batchNo || "",
+    startedAt: item.startedAt || "",
+    finishedAt: item.finishedAt || item.startedAt || "",
+    shift: item.shift || "未识别",
+    shiftDate: item.shiftDate || "",
+    inputQty,
+    outputQty,
+    goodQty,
+    ngQty,
+    yieldRate,
+    operator: item.operator || "",
+    sourceFile: item.sourceFile || "",
+    sourceFileName: item.sourceFileName || "",
+    sourceFileHash: item.sourceFileHash || "",
+    sourceRowIndex: Number(item.sourceRowIndex || 0),
+    importedAt: item.importedAt || "",
+    note: item.note || "",
+  };
+}
+
+function normalizeMachineDataFile(item = {}) {
+  return {
+    path: item.path || item.relativePath || "",
+    relativePath: item.relativePath || item.path || "",
+    fileName: item.fileName || "",
+    folderPath: item.folderPath || "",
+    machineType: item.machineType || "",
+    machineFolder: item.machineFolder || "",
+    categoryDir: item.categoryDir || "",
+    dataDir: item.dataDir || "",
+    ext: item.ext || "",
+    size: Number(item.size || 0),
+    modifiedAt: item.modifiedAt || "",
+    modifiedDate: item.modifiedDate || "",
+    modifiedTime: Number(item.modifiedTime || 0),
+    status: item.status || "待扫描",
+    canOpen: item.canOpen === true,
+  };
+}
+
+function normalizeMachineDataLog(item = {}, index = 0) {
+  return {
+    id: item.id || `log-${String(index + 1).padStart(3, "0")}`,
+    scannedAt: item.scannedAt || "",
+    filePath: item.filePath || "",
+    fileName: item.fileName || "",
+    status: item.status || "skipped",
+    message: item.message || "",
+    importedCount: Number(item.importedCount || 0),
+  };
+}
+
 function migrateState(raw) {
   const base = clone(SEED_STATE);
   const next = { ...base, ...raw };
@@ -304,6 +383,10 @@ function migrateState(raw) {
     ? raw.production.map((item, index) => normalizeProductionRecord(item, index))
     : base.production;
   next.machines = Array.isArray(raw.machines) ? raw.machines.map((item, index) => normalizeMachineRecord(item, index)) : base.machines;
+  next.machineDataConfig = normalizeMachineDataConfig(raw.machineDataConfig || base.machineDataConfig);
+  next.machineDataFiles = Array.isArray(raw.machineDataFiles) ? raw.machineDataFiles.map(normalizeMachineDataFile) : [];
+  next.machineRuns = Array.isArray(raw.machineRuns) ? raw.machineRuns.map((item, index) => normalizeMachineRun(item, index)) : [];
+  next.machineDataLogs = Array.isArray(raw.machineDataLogs) ? raw.machineDataLogs.map((item, index) => normalizeMachineDataLog(item, index)) : [];
   reconcileMachineAssignments(next);
   return next;
 }

@@ -107,6 +107,23 @@ export async function importMachinesRemote(machines, token) {
   return request("/api/machines/import", { method: "POST", token, body: { machines } });
 }
 
+export async function saveMachineDataConfigRemote(config, token) {
+  return request("/api/machine-data/config", { method: "POST", token, body: { config } });
+}
+
+export async function listMachineDataFilesRemote(filters, token) {
+  const query = new URLSearchParams(Object.entries(filters || {}).filter(([, value]) => value !== undefined && value !== "")).toString();
+  return request(`/api/machine-data/files${query ? `?${query}` : ""}`, { token });
+}
+
+export async function openMachineDataFolderRemote(path, token) {
+  return request("/api/machine-data/open-folder", { method: "POST", token, body: { path } });
+}
+
+export async function scanMachineDataRemote(token, filters = {}) {
+  return request("/api/machine-data/scan", { method: "POST", token, body: { filters } });
+}
+
 export async function saveFinanceRemote(record, token) {
   return request("/api/finance", { method: "POST", token, body: { record } });
 }

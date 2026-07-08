@@ -60,6 +60,10 @@ import {
   saveFinanceRemote,
   saveUserRemote,
   importMachinesRemote,
+  listMachineDataFilesRemote,
+  openMachineDataFolderRemote,
+  saveMachineDataConfigRemote,
+  scanMachineDataRemote,
   stockInProductionRemote,
   updateMachineRemote,
 } from "./lib/api.js";
@@ -69,6 +73,7 @@ import { renderInventory } from "./views/inventory.js";
 import { renderOutbound } from "./views/outbound.js";
 import { renderProduction } from "./views/production.js";
 import { renderMachine } from "./views/machine.js";
+import { renderMachineStats } from "./views/machineStats.js";
 import { renderFinance } from "./views/finance.js";
 import { renderUsers } from "./views/users.js";
 import { renderRoadmap } from "./views/roadmap.js";
@@ -90,6 +95,8 @@ const FORM_RESOURCE = {
   finance: "finance",
   user: "users",
 };
+
+let machineFileRefreshTimer = null;
 
 function currentNav(state) {
   return NAV_ITEMS.find((item) => item.key === state.active) || NAV_ITEMS[0];
@@ -267,6 +274,9 @@ function renderMain(state) {
       case "machine":
         elements.main.innerHTML = renderMachine(state, { currentUser });
         break;
+      case "machineStats":
+        elements.main.innerHTML = renderMachineStats(state, { currentUser });
+        break;
       case "finance":
         elements.main.innerHTML = renderFinance(state, { currentUser });
         break;
@@ -365,6 +375,80 @@ function updateMachineFiltersFromDom() {
   }
 }
 
+function updateMachineRunFiltersFromDom() {
+  const activeFilter = document.activeElement?.getAttribute?.("data-machine-run-filter") || "";
+  const activeSelectionStart =
+    typeof document.activeElement?.selectionStart === "number" ? document.activeElement.selectionStart : null;
+  setUi({
+    machineRunFilters: {
+      date: document.querySelector('[data-machine-run-filter="date"]')?.value || "",
+      shift: document.querySelector('[data-machine-run-filter="shift"]')?.value || "",
+      machineType: document.querySelector('[data-machine-run-filter="machineType"]')?.value || "",
+      keyword: document.querySelector('[data-machine-run-filter="keyword"]')?.value || "",
+    },
+    tablePages: { ...(getState().ui?.tablePages || {}), machineRuns: 1, machineRunMachines: 1 },
+  });
+  render();
+  if (!activeFilter) return;
+  const nextActive = document.querySelector(`[data-machine-run-filter="${CSS.escape(activeFilter)}"]`);
+  nextActive?.focus();
+  if (activeSelectionStart !== null && typeof nextActive?.setSelectionRange === "function") {
+    nextActive.setSelectionRange(activeSelectionStart, activeSelectionStart);
+  }
+}
+
+function machineDataFileFiltersFromDom() {
+  return {
+    machineType: document.querySelector('[data-machine-file-filter="machineType"]')?.value || "",
+    machineKeyword: document.querySelector('[data-machine-file-filter="machineKeyword"]')?.value || "",
+    ext: document.querySelector('[data-machine-file-filter="ext"]')?.value || "",
+    status: document.querySelector('[data-machine-file-filter="status"]')?.value || "",
+    modifiedFrom: document.querySelector('[data-machine-file-filter="modifiedFrom"]')?.value || "",
+    modifiedTo: document.querySelector('[data-machine-file-filter="modifiedTo"]')?.value || "",
+  };
+}
+
+function updateMachineDataFileFiltersFromDom() {
+  const activeFilter = document.activeElement?.getAttribute?.("data-machine-file-filter") || "";
+  const activeSelectionStart =
+    typeof document.activeElement?.selectionStart === "number" ? document.activeElement.selectionStart : null;
+  const filters = machineDataFileFiltersFromDom();
+  setUi({
+    machineDataFileFilters: filters,
+    tablePages: { ...(getState().ui?.tablePages || {}), machineDataFiles: 1 },
+  });
+  render();
+  if (!activeFilter) return;
+  const nextActive = document.querySelector(`[data-machine-file-filter="${CSS.escape(activeFilter)}"]`);
+  nextActive?.focus();
+  if (activeSelectionStart !== null && typeof nextActive?.setSelectionRange === "function") {
+    nextActive.setSelectionRange(activeSelectionStart, activeSelectionStart);
+  }
+  if (isServerMode()) {
+    window.clearTimeout(machineFileRefreshTimer);
+    machineFileRefreshTimer = window.setTimeout(() => {
+      refreshMachineDataFiles(filters).catch((error) => console.warn(error.message || "读取文件失败"));
+    }, 350);
+  }
+}
+
+function refreshMachineDataFiles(filters = getState().ui?.machineDataFileFilters || {}) {
+  if (!isServerMode()) {
+    alert("NAS 文件浏览需要在后端服务模式执行。");
+    return Promise.resolve(null);
+  }
+  return listMachineDataFilesRemote(filters, getAuthToken()).then((payload) => {
+    setUi({
+      machineDataFiles: payload.files || [],
+      machineDataFileTotal: payload.totalFiles || 0,
+      machineDataFilesLoaded: true,
+      tablePages: { ...(getState().ui?.tablePages || {}), machineDataFiles: 1 },
+    });
+    render();
+    return payload;
+  });
+}
+
 function updateProductionMachinePoolFilters(panel = document.querySelector(".assignment-panel")) {
   if (!panel) return;
   const keyword = String(panel.querySelector('[data-machine-pool-filter="keyword"]')?.value || "").trim().toLowerCase();
@@ -386,6 +470,19 @@ function updateProductionMachinePoolFilters(panel = document.querySelector(".ass
     if (visibleText) visibleText.textContent = new Intl.NumberFormat("zh-CN").format(visibleCount);
     if (selectedText) selectedText.textContent = new Intl.NumberFormat("zh-CN").format(selectedCount);
   });
+}
+
+function setProductionMachinePoolType(panel, type) {
+  if (!panel || !type) return;
+  panel.dataset.activeMachinePool = type;
+  panel.querySelectorAll("[data-action='machine-pool-type']").forEach((button) => {
+    const active = button.getAttribute("data-type") === type;
+    button.classList.toggle("primary", active);
+  });
+  panel.querySelectorAll("[data-machine-pool-type]").forEach((pool) => {
+    pool.hidden = pool.getAttribute("data-machine-pool-type") !== type;
+  });
+  updateProductionMachinePoolFilters(panel);
 }
 
 function render() {
@@ -1001,6 +1098,12 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (action === "machine-pool-type") {
+    const panel = button.closest(".assignment-panel");
+    setProductionMachinePoolType(panel, button.getAttribute("data-type") || "");
+    return;
+  }
+
   if (action === "machine-pool-select-visible") {
     const pool = button.closest(".machine-pool");
     pool?.querySelectorAll("[data-machine-option]:not(.is-hidden) input[name='machineIds']:not(:disabled)").forEach((input) => {
@@ -1016,6 +1119,88 @@ document.addEventListener("click", (event) => {
       input.checked = false;
     });
     updateProductionMachinePoolFilters(pool?.closest(".assignment-panel"));
+    return;
+  }
+
+  if (action === "machine-run-filter-reset") {
+    setUi({
+      machineRunFilters: {
+        date: "",
+        shift: "",
+        machineType: "",
+        keyword: "",
+      },
+      tablePages: { ...(getState().ui?.tablePages || {}), machineRuns: 1, machineRunMachines: 1 },
+    });
+    render();
+    return;
+  }
+
+  if (action === "machine-file-filter-reset") {
+    setUi({
+      machineDataFileFilters: {
+        machineType: "",
+        machineKeyword: "",
+        ext: "",
+        status: "",
+        modifiedFrom: "",
+        modifiedTo: "",
+      },
+      machineDataFilesLoaded: false,
+      tablePages: { ...(getState().ui?.tablePages || {}), machineDataFiles: 1 },
+    });
+    render();
+    return;
+  }
+
+  if (action === "machine-data-refresh-files") {
+    button.disabled = true;
+    button.textContent = "读取中...";
+    refreshMachineDataFiles()
+      .catch((error) => alert(error.message || "读取文件失败"))
+      .finally(() => {
+        button.disabled = false;
+        button.textContent = "刷新文件列表";
+      });
+    return;
+  }
+
+  if (action === "machine-data-open-folder") {
+    if (!isServerMode()) {
+      alert("打开 NAS 目录需要在后端服务模式执行。");
+      return;
+    }
+    const targetPath = button.getAttribute("data-path") || getState().machineDataConfig?.nasPath || "";
+    openMachineDataFolderRemote(targetPath, getAuthToken()).catch((error) => alert(error.message || "打开目录失败"));
+    return;
+  }
+
+  if (action === "machine-data-scan") {
+    if (!isServerMode()) {
+      alert("NAS 扫描需要在服务器模式执行，请在线上环境配置 NAS 挂载路径后扫描。");
+      return;
+    }
+    if (getCurrentUser()?.role !== "admin") {
+      alert("只有管理员可以扫描 NAS 机台数据。");
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "扫描中...";
+    scanMachineDataRemote(getAuthToken(), getState().ui?.machineDataFileFilters || {})
+      .then((payload) => {
+        applyServerBootstrap(payload);
+        const summary = payload.summary || {};
+        return refreshMachineDataFiles().then(() => summary);
+      })
+      .then((summary) => {
+        render();
+        alert(`扫描完成：导入 ${summary.importedRuns || 0} 条，新增文件 ${summary.importedFiles || 0} 个，异常 ${summary.errorFiles || 0} 个。`);
+      })
+      .catch((error) => {
+        button.disabled = false;
+        button.textContent = "扫描筛选文件";
+        alert(error.message || "扫描失败");
+      });
     return;
   }
 
@@ -1691,6 +1876,18 @@ document.addEventListener("change", (event) => {
     return;
   }
 
+  const machineRunFilter = event.target.closest("[data-machine-run-filter]");
+  if (machineRunFilter) {
+    updateMachineRunFiltersFromDom();
+    return;
+  }
+
+  const machineFileFilter = event.target.closest("[data-machine-file-filter]");
+  if (machineFileFilter) {
+    updateMachineDataFileFiltersFromDom();
+    return;
+  }
+
   const tablePageSize = event.target.closest("[data-table-page-size]");
   if (tablePageSize) {
     const pageKey = tablePageSize.getAttribute("data-page-key") || "";
@@ -1740,6 +1937,18 @@ document.addEventListener("input", (event) => {
     return;
   }
 
+  const machineRunFilter = event.target.closest("[data-machine-run-filter]");
+  if (machineRunFilter) {
+    updateMachineRunFiltersFromDom();
+    return;
+  }
+
+  const machineFileFilter = event.target.closest("[data-machine-file-filter]");
+  if (machineFileFilter) {
+    updateMachineDataFileFiltersFromDom();
+    return;
+  }
+
   const inboundFilter = event.target.closest("[data-filter]");
   if (!inboundFilter) return;
   updateInboundFiltersFromDom();
@@ -1767,6 +1976,41 @@ document.addEventListener("submit", (event) => {
         render();
       })
       .catch((error) => alert(error.message || "登录失败"));
+    return;
+  }
+
+  if (formKey === "machine-data-config") {
+    const config = {
+      nasPath: String(formData.get("nasPath") || "").trim(),
+      testerDir: String(formData.get("testerDir") || "测试机").trim(),
+      sorterDir: String(formData.get("sorterDir") || "分选机").trim(),
+      testerDataDir: String(formData.get("testerDataDir") || "测试档").trim(),
+      sorterDataDir: String(formData.get("sorterDataDir") || "CN").trim(),
+      dayShiftStart: String(formData.get("dayShiftStart") || "08:00").trim(),
+      nightShiftStart: String(formData.get("nightShiftStart") || "20:00").trim(),
+    };
+    if (!config.nasPath) {
+      alert("请填写 NAS 挂载路径。");
+      return;
+    }
+    if (isServerMode()) {
+      saveMachineDataConfigRemote(config, getAuthToken())
+        .then((payload) => {
+          applyServerBootstrap(payload);
+          return refreshMachineDataFiles(getState().ui?.machineDataFileFilters || {});
+        })
+        .then(() => {
+          alert("NAS 配置已保存，文件列表已刷新。");
+        })
+        .catch((error) => alert(error.message || "保存失败"));
+      return;
+    }
+    mutateState((draft) => {
+      draft.machineDataConfig = { ...(draft.machineDataConfig || {}), ...config };
+      return { ok: true };
+    });
+    render();
+    alert("本地预览已保存配置；真正扫描需要在线上服务器模式执行。");
     return;
   }
 

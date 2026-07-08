@@ -1,5 +1,10 @@
 .DS_Store
 Thumbs.db
 *.log
+.env
+.env.*
+*.local.env
 /data/
 /backups/
+/collector-state/
+*.collector-state.json
